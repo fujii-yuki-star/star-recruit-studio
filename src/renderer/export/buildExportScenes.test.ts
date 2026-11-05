@@ -268,6 +268,29 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(staged[0]).toEqual({ dir: 'scene_frames_0_0', index: 0, url: 'data:image/png;base64,PNG' });
   });
 
+  // **前のコマと同じ絵は描き直さない**（書き出しの高速化 2026-10-22）＝描く材料（SVG）が同じなら PNG を使い回す。
+  // ⚠️ コマは全部置く（数が減ると動画が縮む）・材料が違うコマは必ず描き直す。
+  it('アニメの窓で、描く材料が前のコマと同じなら描き直さず同じ PNG を置く（コマは全部置く）', async () => {
+    const { svgToPngDataUrl } = await import('./rasterize');
+    const { layoutToSvg } = await import('../sceneSvg');
+    vi.mocked(svgToPngDataUrl).mockClear();
+    let n = 0;
+    // 5コマごとに材料が変わる（動いている）＝描くのは変わったときだけ。
+    vi.mocked(layoutToSvg).mockImplementation(() => `<svg data-step="${Math.floor(n++ / 5)}"/>`);
+    const staged: number[] = [];
+    await buildExportScenes(
+      animScene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+      async (_dir, frameIndex) => { staged.push(frameIndex); },
+    );
+    const frames = Math.ceil(1 * FPS) + 1;
+    expect(staged).toHaveLength(frames);
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(Math.ceil(frames / 5));
+    vi.mocked(layoutToSvg).mockImplementation(() => '<svg/>');
+  });
+
   it('掛け合い（lines）併用のアニメは行セグメントごとにフレーム列を焼く（③・書き出し=プレビュー）', async () => {
     const multi = [{
       sceneId: 's1', templateId: 'tpl', durationSec: 8,

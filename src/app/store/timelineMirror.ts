@@ -70,12 +70,20 @@ export function isDeniedAction(name: string): boolean {
 export const PREVIEW_LOCAL_ACTIONS: ReadonlySet<string> = new Set(["selectClip", "selectClips", "clearSelection"]);
 
 /**
- * 写さない項目＝取り消しの履歴（重い・別窓は取り消しを持たない）と、`_` で始まる内部の段取り
- * （本体の中でだけ意味がある。`Set` など窓をまたげない物も含む）。
+ * 写さない項目の名前。
+ * - `history`＝取り消しの履歴（重い・別窓は取り消しを持たない）。
+ * - `audioSrcByKey`＝鳴らす音の中身（data URL・数十MBになりうる）。⚠️ **別窓は音を鳴らさない**（ADR-0050 決定2）ので要らない。
+ *   写していたので、声を1本作るたびに辞書まるごとを文字列にして2回（確かめ用・送る用）別窓へ送り、別窓にも同じ物がもう1部できていた
+ *   （まとめて N 本作ると送る量が N² で増える・負荷試験 2026-10-22 の静的レビュー 🔴）。
+ */
+export const MIRROR_SKIPPED_KEYS: ReadonlySet<string> = new Set(["history", "audioSrcByKey"]);
+
+/**
+ * 写さない項目＝上の名前と、`_` で始まる内部の段取り（本体の中でだけ意味がある。`Set` など窓をまたげない物も含む）。
  */
 export function isMirroredKey(key: string, value: unknown): boolean {
   if (typeof value === "function") return false;
-  if (key === "history") return false;
+  if (MIRROR_SKIPPED_KEYS.has(key)) return false;
   return !key.startsWith("_");
 }
 

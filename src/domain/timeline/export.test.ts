@@ -233,6 +233,7 @@ describe('timelineAudioRuns', () => {
       {
         clipId: 'clip_001',
         sourceKey: 'voice:voices/clip_001.wav',
+        assetPath: 'voices/clip_001.wav',
         fileExt: 'wav',
         delaySec: 2,
         playSec: 3,
@@ -249,6 +250,23 @@ describe('timelineAudioRuns', () => {
   it('読み上げは繰り返さない／BGM は繰り返す（言葉が二重に鳴らない）', () => {
     const d = doc({ clips: [voiceClip('clip_001'), clip('clip_002', { bundledBgmId: 'found-new-hope' })] });
     expect(timelineAudioRuns(d).runs.map((r) => r.loop)).toEqual([false, true]);
+  });
+
+  // ⚠️ **取り込んだ音・読み上げはパスで渡す**（負荷・耐久の点検 2026-10-22／読み上げは 2026-11-04）＝中身（base64）にしない。
+  //   同梱 BGM だけは今までどおり中身（`audioSrcByKey`）で渡す＝プロジェクトの外にあるのでパスを持たせない。
+  it('取り込んだ音・読み上げはパスで渡す（同梱 BGM は持たない）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.wav' }],
+      clips: [
+        voiceClip('clip_001'),
+        clip('clip_002', { bundledBgmId: 'found-new-hope' }),
+        clip('clip_003', { assetId: 'asset_001' }),
+      ],
+    } as never);
+    const byId = new Map(timelineAudioRuns(d).runs.map((r) => [r.clipId, r]));
+    expect(byId.get('clip_001')).toMatchObject({ sourceKey: 'voice:voices/clip_001.wav', assetPath: 'voices/clip_001.wav', fileExt: 'wav' });
+    expect(byId.get('clip_002')!.assetPath).toBeUndefined();
+    expect(byId.get('clip_003')).toMatchObject({ sourceKey: 'asset:asset_001', assetPath: 'assets/asset_001.wav', fileExt: 'wav' });
   });
 
   it('音量は再生と同じ解決（BGM の既定は 0.25）', () => {

@@ -2,7 +2,7 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation, EXPORT_SIZE, exportDimsForOrientation, exportSizeIsLight, exportSizeMaxBitrateBps, PROJECT_NAME_MAX_LENGTH, type ExportSize } from "../../domain/constants";
-import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio, trashProjectFiles } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, audioPlayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, missingAssetFiles, readAssetDataUrl, videoFilmstrip, ensureDenoisedAudio, trashProjectFiles } from "../../infrastructure/assetFs";
 import { assetKindOf, changesAssetKind, exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { relinkTimelineAsset } from "../../domain/timeline/relink";
 import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
@@ -12,7 +12,6 @@ import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { audioUnreadableMessage, bulkVoiceNotFittedMessage, clipLabel, editBlockedMessage, ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, subtitleFileMessage, subtitleImportedMessage, voicesFromSubtitlesMessage } from "../uiLabels";
 import { runBulkImport } from "./bulkImport";
 import type { Asset } from "../../domain/project/types";
-import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioAssetDurationSec, audioSourceKey, audioSourceKindOf, audioSourcesOf, denoiseSourceKey } from "../../domain/timeline/audio";
 import type { AudioSource } from "../../domain/timeline/audio";
@@ -73,6 +72,12 @@ import { buildTimelineParts } from "../../renderer/export/buildTimelineParts";
 import { renderTimelineThumbnail, timelineThumbnailKey } from "../../renderer/export/timelineThumbnail";
 import { thumbnailSourcePath } from "../../domain/timeline/thumbnail";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { PARALLEL_MIN_FRAMES } from "../../renderer/export/parallelFrames";
+import { extraRenderWindows } from "../../domain/export/renderWindowPlan";
+import { memoryStatus, canOpenRenderWindows, closeRenderWindow, onRenderReport, openRenderWindow, reasonForLog, sendToRenderWindow } from "../../infrastructure/renderWindowLink";
+import { packFontSourceList } from "../../infrastructure/userFontFs";
+import { openRenderHelpers, type RenderHelperPool, type RenderSegment } from "../renderWindow/renderHelpers";
+import { probeFrameOf, probeHash, sessionDrawOptions, sessionTemplateAssets, type RenderSessionPayload } from "../renderWindow/renderSession";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import type { LayerBackground, TextShadow } from "../../domain/template/types";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
@@ -89,7 +94,7 @@ import {
   accountStagedVideo,
   beginExport, beginExportDiskWatch, canExport, cancelExport, clearExportFramesStage,
   endExportDiskWatch, exportVideo, listenExportProgress,
-  readExportFrame, stageClipFrames, stageExportFrame,
+  accountStagedFramesFromHelper, copyExportFrames, readExportFrame, stageClipFrames, stageExportFrame, stageExportFramePng,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
@@ -131,7 +136,20 @@ export type VoiceNoticeSink =
        * ⚠️ 手で置いた読み上げは移さない（置いた列を黙って変えない）＝今までどおり「合わせられなかった」を知らせる。
        */
       makeRoom: boolean;
+      /**
+       * **まとめて作った声は、取り消しの履歴を1つだけ使う**（負荷・耐久の点検 2026-10-22）＝1本ごとに積むと、
+       * 上限（`HISTORY_LIMIT`＝50）を声だけで使い切り、その前の自分の編集が取り消せなくなる。
+       * 最初の1本で積んだ後の `history.past`（同じ配列）を覚えておき、次の1本のときに**同じ配列のまま**なら
+       * （＝間に他の記録が無い）積まずに合流する。⚠️ 間に利用者の編集・取り消しが入ったら、新しく1つ積む
+       * （合流すると、その編集の取り消しで後から作った声まで消える）。
+       */
+      history: BulkHistoryJoin;
     };
+
+/** まとめて作る間の「最後に自分が積んだ履歴」（`commit` の `joinBulk`）。 */
+export interface BulkHistoryJoin {
+  past: readonly TimelineProject[] | null;
+}
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -2481,6 +2499,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     try {
       const result = await voiceProvider.synthesize(input);
       const voicePath = await importVoiceFile(doc.projectId, clipId, result.audioDataUrl);
+      const playUrl = voicePath ? await audioPlayUrl(doc.projectId, voicePath) : null;
       // 作っている間に文書が入れ替わった／この部品が消えた／設定を変えた＝結果は捨てる。
       const now = get().doc;
       const current = now?.clips.find((c) => c.id === clipId);
@@ -2542,9 +2561,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         }
       }
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
-        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
+        // ⚠️ **置いたファイルを鳴らす**（中身は持たない）。アプリの外（ブラウザ）では置き場が無いので作った中身で鳴らす。
+        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: playUrl ?? result.audioDataUrl },
         ...(editBlocked ? { editBlocked } : {}),
-      }, { outsideGroup: true });
+      }, { outsideGroup: true, ...(notice.kind === "collect" ? { joinBulk: notice.history } : {}) });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
       // ⚠️ **自分から保存する**（#751）。自動保存は**画面**が持っているので、作っている最中に
@@ -2624,7 +2644,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 約束を全部見直すことになるので、まずは順に回す（中止はこの形がいちばん確実に効く）。
       // **長さを合わせられなかったぶんを集める**（#1045）＝1件ごとに「選んだ部品」の欄へ出すと、
       // 相手が違ううえに**次の1件の断りで上書きされる**（最後の1件しか残らない）。
-      const notice: VoiceNoticeSink = { kind: "collect", notFitted: [], makeRoom: only?.makeRoom ?? false };
+      const notice: VoiceNoticeSink = {
+        kind: "collect",
+        notFitted: [],
+        makeRoom: only?.makeRoom ?? false,
+        history: { past: null },
+      };
       // ⚠️ **作成済みなのに音が読めない読み上げも作り直す**（通し点検 2026-10-16）＝声のファイルが消えた動画で、
       //   印だけ見て飛ばすと「作りました」と言い、書き出しは「声を作ってください」と断る＝行き止まり。
       //   「読めるか」は書き出しの「読めない音」と同じ材料（`audioSrcByKey`）で見る＝先にそろえる。
@@ -2971,6 +2996,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return; // 走行中のまま固まらせない（立てた `preparing` を戻す）
     }
     let unlisten: (() => void) | undefined;
+    /** 書き出しのコマを描く隠した窓（ADR-0070）。**どの出口でも閉じる**（finally）。 */
+    let helperPool: RenderHelperPool | null = null;
     try {
       // 見た目パターンの解決は**代表フレームの要否**（どの枠が実フレームで描かれるか＝#512 段3）にも
       // 要るので、絵を描く手前ではなく**ここで**用意する（同じ表を2度作らない）。
@@ -3067,23 +3094,35 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // ⚠️ **空きを見張る**（#1211）＝焼くコマ数は**割り方が既に知っている**ので渡せる。
       // 渡すと「このままでは足りない」を**数十コマで**判じられる（いまは12分以上待たされてから尽きる）。
       // ⚠️ **倒せた区間は1コマも焼かない**ので、そのぶんは数に入れない（決定22-2 追補1）。
-      beginExportDiskWatch({
-        totalFrames: bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps),
-        outPath: outputPath,
-      });
-      const parts = await buildTimelineParts(doc, {
-        templateOf,
-        assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+      const bakeTotal = bakeFrameTotal(planTimelineExportSegments(doc, templateOf), timelineFramePlan(doc).fps);
+      beginExportDiskWatch({ totalFrames: bakeTotal, outPath: outputPath });
+      // 描く材料（ADR-0070＝隠した別の窓も**同じ組み立て**を通す＝`sessionDrawOptions`）。
+      const drawSession = {
+        templates: deps.templates,
         // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
-        assetSizeOf: (id) => assetSizes[id],
-        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
-        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        assetSizes,
         // 書き出す大きさ（#1255）＝場面形式と**同じ計算**（`exportDimsForOrientation`）を通す。
         // ⚠️ **渡さないと常に 1920×1080**＝口（`outputSize`）は前から在ったのに、
         //   タイムライン側だけ渡していなかった（同じ書き出しで選べる・選べないが分かれていた）。
         outputSize: exportDimsForOrientation(doc.videoSettings.aspectRatio, exportSizeIsLight(get().exportSize)),
+        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
+        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
+      };
+      const drawOptions = sessionDrawOptions(drawSession, (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined));
+      // **隠した別の窓でも描く**（ADR-0070）＝長い動画で、コアと空きメモリに余裕があるときだけ。使えなければ本体だけ（いままでどおり）。
+      helperPool = bakeTotal >= PARALLEL_MIN_FRAMES && canOpenRenderWindows()
+        ? await openHelpersForExport(doc, drawSession, drawOptions, deps, exportSrcById)
+        : null;
+      console.info(`[export] render windows: ${helperPool?.size() ?? 0}`);
+      const parts = await buildTimelineParts(doc, {
+        ...drawOptions,
+        ...(helperPool && helperPool.size() > 0 ? { parallelDrawersFor: (seg: RenderSegment) => helperPool!.drawersFor(seg) } : {}),
         stageFrame: stageExportFrame,
+        // ⚠️ **PNG は別スレッドで作り、バイトのまま運ぶ**（書き出しの高速化・2026-10-23）＝base64 の口より優先される。
+        stageFramePng: stageExportFramePng,
+        // 前のコマと同じ絵のコマは、置き場の前のコマから作る（書き出しの高速化・2026-10-22）。
+        copyFrames: copyExportFrames,
         // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
         // ⚠️ 素材は**プロジェクトからの相対パス**で渡す（`stage_clip_frames` がそう解決する）。
         // 動画の id が解けない・プロジェクト id が無いときは渡さない＝静止のまま（画面が先に断る）。
@@ -3114,7 +3153,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 区間を書き出しの入力へ写す（#1203）。⚠️ **音は渡さない**（`useOriginalAudio: false`）＝
       // 動画の元の音は**下の `bgmRuns`** で渡っているので、ここでも鳴らすと**二重に鳴る**。
       const scenes = parts.map((p) => {
-        if (!p.video) return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir };
+        if (!p.video) {
+          return { fps: p.fps, durationSec: p.durationSec, framesDir: p.framesDir, ...(p.expectedFrames != null ? { expectedFrames: p.expectedFrames } : {}) };
+        }
         const asset = doc.assets.find((x) => x.assetId === p.video!.assetId);
         return {
           fps: p.fps,
@@ -3178,6 +3219,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
     } finally {
       unlisten?.();
+      // ⚠️ **隠した窓はどの出口でも閉じる**（ADR-0070）＝残すと、見えない窓がメモリを持ったまま居続ける。
+      await helperPool?.close().catch(() => {});
       // ⚠️ **見張りはどの出口でも終える**（#1211）＝残すと、次の書き出しが**前回の焼いた数**を
       // 引き継いで、見積もりが狂う（少なく見積もって、足りないのに通す）。
       endExportDiskWatch();
@@ -3291,13 +3334,62 @@ async function loadAudioSrc(doc: TimelineProject, src: AudioSource): Promise<[st
     return display ? [audioSourceKey(src), `${display}?t=${Date.now()}`] : null;
   }
   const url = src.voicePath
-    ? await readVoiceDataUrl(doc.projectId, src.voicePath)
+    // ⚠️ **読み上げも中身を読まない**（書き出しの仕上げ 2026-11-04）＝1本は小さいが、長い動画では数十 MB になり、
+    //   消した部品の声も取り消しのために持ち続ける。鳴らすのは asset:// の URL・書き出しはファイルのパス（取り込んだ音と同じ）。
+    ? await audioPlayUrl(doc.projectId, src.voicePath)
     : src.bundledBgmId
       ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
       : src.assetId
-        ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
+        // ⚠️ **取り込んだ音は中身を読まない**（負荷・耐久の点検 2026-10-22）＝数百 MB の WAV で落ちうる。
+        //   鳴らすのは asset:// の URL・書き出しはファイルのパス（`timelineAudioRuns` の `assetPath`）。
+        ? await audioPlayUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
         : null;
   return url ? [audioSourceKey(src), url] : null;
+}
+
+/**
+ * 書き出しのコマを描く隠した窓を開く（ADR-0070）。足す数はコアと空きメモリで決める（`extraRenderWindows`）。
+ * 本体で確かめの1コマを描き、窓の絵と印が同じ窓だけを使う。1つも使えなければ `null`（本体だけで描く）。
+ */
+async function openHelpersForExport(
+  doc: TimelineProject,
+  drawSession: Pick<RenderSessionPayload, 'templates' | 'assetSizes' | 'outputSize' | 'fontFamily' | 'fallbackCredit'>,
+  drawOptions: ReturnType<typeof sessionDrawOptions>,
+  deps: TimelineDrawDeps,
+  exportSrcById: Record<string, string>,
+): Promise<RenderHelperPool | null> {
+  try {
+    const logicalCores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined;
+    const memory = await memoryStatus();
+    const extra = extraRenderWindows({ logicalCores, memory });
+    // 足さなかった理由を後から追えるように残す（普段の実況＝info）。
+    const mb = (n: number | undefined) => (n == null ? "?" : Math.round(n / 1048576));
+    console.info(`[export] render windows plan: extra=${extra} cores=${logicalCores ?? "?"} totalMB=${mb(memory?.totalPhys)} availMB=${mb(memory?.availPhys)} commitMB=${mb(memory?.availCommit)}`);
+    if (extra <= 0) return null;
+    const sub = sessionTemplateAssets(doc, drawSession.templates, deps.templateAssetSrcById);
+    const probeFrame = probeFrameOf(doc);
+    const session: RenderSessionPayload = {
+      sessionId: `${doc.projectId}-${Date.now()}`,
+      doc,
+      ...drawSession,
+      ...sub,
+      knownSrcIds: [...new Set([...Object.keys(exportSrcById), ...Object.keys(deps.templateAssetSrcById)])],
+      packFonts: packFontSourceList(),
+      probeFrame,
+    };
+    const mainProbe = await probeHash(doc, drawOptions, probeFrame);
+    const pool = await openRenderHelpers(extra, session, mainProbe, {
+      link: { open: openRenderWindow, close: closeRenderWindow, send: sendToRenderWindow, onReport: onRenderReport },
+      accountFrames: accountStagedFramesFromHelper,
+    });
+    if (pool.size() > 0) return pool;
+    await pool.close();
+    return null;
+  } catch (e) {
+    // 窓を使えない＝本体だけで描く（書き出しは止めない）。
+    console.info(`[export] render windows unavailable: ${reasonForLog(e)}`);
+    return null;
+  }
 }
 
 type SetState = (partial: Partial<TimelineState>) => void;
@@ -3411,13 +3503,15 @@ async function runImport(
  * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
+ * @param opts.joinBulk **まとめて作った声を1つの記録へ合流させる**（`BulkHistoryJoin`）＝前に自分が積んだ直後から
+ *   履歴が動いていなければ積まない。動いていたら（利用者の編集・取り消し）新しく積む。
  */
 function commit(
   set: SetState,
   get: GetState,
   next: TimelineProject,
   extra: Partial<TimelineState> = {},
-  opts: { outsideGroup?: boolean } = {},
+  opts: { outsideGroup?: boolean; joinBulk?: BulkHistoryJoin } = {},
 ): void {
   // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
   if (isTimelineExportBusy(get().exportRun.phase)) {
@@ -3432,10 +3526,13 @@ function commit(
   // グループ中は**最初の実変更だけ**積む（1文字ごとに積むと、上限 50 を文字入力だけで食い潰し、
   // それ以前の編集＝「バラす」などが取り消せなくなる・#708）。
   const inGroup = get()._historyGroupDepth > 0 && !opts.outsideGroup;
-  const record = !inGroup || get()._historyGroupPending;
+  const joined = opts.joinBulk != null && opts.joinBulk.past != null && opts.joinBulk.past === get().history.past;
+  const record = !joined && (!inGroup || get()._historyGroupPending);
+  const history = record ? recordSnapshot(get().history, current) : get().history;
+  if (opts.joinBulk) opts.joinBulk.past = history.past;
   set({
     doc: next,
-    history: record ? recordSnapshot(get().history, current) : get().history,
+    history,
     // まとめに参加した分だけ「記録済み」にする（参加していない完了で他人のまとめを消費しない）。
     ...(inGroup ? { _historyGroupPending: false } : {}),
     editBlocked: null,

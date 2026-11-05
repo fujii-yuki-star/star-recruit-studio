@@ -32,7 +32,7 @@ async function open(d: TimelineProject): Promise<void> {
 beforeEach(() => {
   vi.restoreAllMocks();
   useTimelineStore.getState().closeTimelineProject();
-  vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:audio/wav;base64,AAA');
+  vi.spyOn(assetFsMod, 'audioPlayUrl').mockResolvedValue('data:audio/wav;base64,AAA');
   vi.spyOn(assetFsMod, 'assetDisplayUrl').mockImplementation(async (_p, rel) => `asset://${rel}`);
 });
 

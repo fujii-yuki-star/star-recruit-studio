@@ -76,6 +76,9 @@
 | [0067](0067-track-volume-and-solo.md) | タイムライン形式の列ごとの音量とソロ | **Accepted**（2026-10-20・α-8） |
 | [0068](0068-noise-reduction.md) | 部品の音のノイズを減らす（タイムライン形式） | **Accepted**（2026-10-20・α-8） |
 | [0069](0069-export-color-bt709.md) | 書き出しの色は BT.709 にそろえて印を付ける（動画と写真の色ずれ） | **Accepted**（2026-10-20・α-8） |
+| [0070](0070-export-parallel-render-windows.md) | 書き出しのコマを、隠した別の窓でも描いて並べて速くする（タイムライン形式） | **Accepted**（2026-10-23） |
+| [0071](0071-voice-engine-on-demand.md) | 声のエンジンは使うときに起動し、しばらく使わなければ止める | **Accepted**（2026-11-04） |
+| [0072](0072-export-encode-while-drawing.md) | 書き出しの圧縮を、コマを描きながら進める（タイムライン形式） | **Rejected**（2026-11-05・試作して測ったが速くならなかった） |
 
 ## 状態の意味
 
@@ -83,5 +86,6 @@
 - **Accepted**: 承認・有効。実装はこれに従う。
 - **Superseded by ADR-XXXX**: 後続ADRに置き換えられた。
 - **Deprecated**: 廃止。
+- **Rejected**: 検討・試作したが採らなかった（理由と戻す条件は本文）。
 
 新規ADRは [`0000-template.md`](0000-template.md) を複製して作成する。

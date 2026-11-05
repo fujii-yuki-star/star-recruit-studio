@@ -1509,6 +1509,8 @@ fn run_export_inner(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
+    // 書き出しの途中でアプリが落ちても、エンコードを走らせ続けない（`proc::bind_to_app_lifetime`）。
+    crate::proc::bind_to_app_lifetime(&child);
     // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
     // ⚠️ **数だけを渡す口**（#1214）＝読む側のスレッドへ Tauri の持ち物を持ち込まないため。
     let (tx, rx) = std::sync::mpsc::channel::<u64>();
@@ -3376,6 +3378,111 @@ fn stage_export_frame_impl(
     frame_index: u32,
     data_base64: String,
 ) -> Result<(), String> {
+    let path = staged_frame_path(&app, &dir_name, frame_index)?;
+    decode_b64_to_file(&data_base64, &path, "staged frame")
+}
+
+/// 置き場の1コマのパス（置き場の名前を確かめ、フォルダを作る）。base64 で受ける口と生のバイトで受ける口で共有する。
+fn staged_frame_path(
+    app: &tauri::AppHandle,
+    dir_name: &str,
+    frame_index: u32,
+) -> Result<PathBuf, String> {
+    if !is_safe_stage_name(dir_name) {
+        return Err(export_failure(
+            format!("invalid stage dir: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    let dir = export_frames_stage_dir(app)?.join(dir_name);
+    fs::create_dir_all(&dir).map_err(|e| {
+        export_failure(
+            format!("create stage dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
+    Ok(dir.join(format!("frame_{frame_index:05}.png")))
+}
+
+/// 1コマの PNG を**生のバイトで**受けて置き場へ書く（書き出しの高速化・2026-10-23）。
+///
+/// ⚠️ base64 の口（`stage_export_frame`）は、画面で文字にする・JSON に包む・ここで戻す、の3回なめていた。
+/// PNG にするのは画面の別スレッド（`pngEncodeWorker`）＝中身は同じ PNG の画素なので、出来上がる動画は変わらない。
+/// ⚠️ **画素のまま（RGBA）は運ばない**＝1コマ 8MB になり、受け渡しだけで 1コマ約 200ms かかった（実測・PNG は約 1MB で約 25ms）。
+/// 置き場の名前とコマの番号はヘッダ（`x-stage-dir`／`x-frame-index`）で受ける（`import_asset_bytes` と同じ流儀）。
+#[tauri::command]
+pub async fn stage_export_frame_png(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let unreadable = || {
+        export_failure(
+            "staged frame png: bad request",
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    };
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(unreadable());
+    };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
+    let dir_name = header("x-stage-dir").ok_or_else(unreadable)?.to_string();
+    let frame_index: u32 = header("x-frame-index")
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(unreadable)?;
+    let bytes = bytes.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = staged_frame_path(&app, &dir_name, frame_index)?;
+        fs::write(&path, &bytes).map_err(|e| {
+            export_failure(
+                format!("write staged frame: {e}"),
+                "動画の保存中に問題が発生しました。空き容量を確かめてから、もう一度お試しください。",
+            )
+        })
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("stage frame task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+/// **前のコマと同じ絵のコマ**を、前のコマのファイルから作る（書き出しの高速化・2026-10-22）。
+///
+/// ⚠️ 絵を作り直さない＝**同じ SVG から作った PNG はバイトまで同じ**なので、描く・PNG にする・base64 で運ぶ、を省く。
+/// 講座の動画（3分36秒・6491コマ）では 90.5% のコマが前のコマと同じだった（字幕と立ち絵が止まっている間）。
+/// 速いハードリンクを先に試し、作れない（別のドライブ・ファイルシステムが対応しない）ときは複写する。
+/// 同じ絵が続くぶんは `to_index` から `count` 枚をまとめて1回で写す（2026-10-23）。
+#[tauri::command]
+pub async fn copy_export_frames(
+    app: tauri::AppHandle,
+    dir_name: String,
+    from_index: u32,
+    to_index: u32,
+    count: u32,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_export_frames_impl(app, dir_name, from_index, to_index, count)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("copy frame task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+/// ⚠️ **同じ絵が続くぶんはまとめて1回で頼む**（`to_index` から `count` 枚・2026-10-23）＝1枚ずつ頼むと、
+/// 講座の動画（9割が前のコマと同じ）では画面の主スレッドの半分が受け渡しの待ちだった。
+fn copy_export_frames_impl(
+    app: tauri::AppHandle,
+    dir_name: String,
+    from_index: u32,
+    to_index: u32,
+    count: u32,
+) -> Result<(), String> {
     if !is_safe_stage_name(&dir_name) {
         return Err(export_failure(
             format!("invalid stage dir: {dir_name}"),
@@ -3383,14 +3490,59 @@ fn stage_export_frame_impl(
         ));
     }
     let dir = export_frames_stage_dir(&app)?.join(&dir_name);
-    fs::create_dir_all(&dir).map_err(|e| {
+    copy_frame_run(&dir, from_index, to_index, count)
+}
+
+/// `dir` の中で、`from_index` のコマを `to_index` から `count` 枚ぶん写す。
+fn copy_frame_run(dir: &Path, from_index: u32, to_index: u32, count: u32) -> Result<(), String> {
+    let from = dir.join(format!("frame_{from_index:05}.png"));
+    for k in 0..count {
+        let to = to_index.saturating_add(k);
+        copy_frame_file(&from, &dir.join(format!("frame_{to:05}.png")))?;
+    }
+    Ok(())
+}
+
+/// 置き場の連番（`frame_NNNNN.png`）で、**最初に抜けている番号**を返す（そろっていれば `None`）。
+/// `expected` があれば 0..expected が全部あるか、無ければ「いちばん大きい番号まで隙間が無いか」を見る。
+fn first_missing_staged_frame(dir: &Path, expected: Option<u32>) -> Option<u32> {
+    let mut present: Vec<u32> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let name = e.file_name();
+                    let name = name.to_str()?;
+                    name.strip_prefix("frame_")?
+                        .strip_suffix(".png")?
+                        .parse::<u32>()
+                        .ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    present.sort_unstable();
+    present.dedup();
+    let need = match expected {
+        Some(n) => n,
+        None => present.last().map_or(0, |m| m + 1),
+    };
+    (0..need).find(|i| present.binary_search(i).is_err())
+}
+
+/// `from` と同じ中身の `to` を作る（ハードリンク→だめなら複写）。`to` が既にあれば置き換える。
+fn copy_frame_file(from: &Path, to: &Path) -> Result<(), String> {
+    if to.exists() {
+        let _ = fs::remove_file(to);
+    }
+    if fs::hard_link(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to).map(|_| ()).map_err(|e| {
         export_failure(
-            format!("create stage dir: {e}"),
-            "動画の保存中に問題が発生しました。もう一度お試しください。",
+            format!("copy staged frame: {e}"),
+            "動画の保存中に問題が発生しました。空き容量を確かめてから、もう一度お試しください。",
         )
-    })?;
-    let path = dir.join(format!("frame_{frame_index:05}.png"));
-    decode_b64_to_file(&data_base64, &path, "staged frame")
+    })
 }
 
 /// フレームのステージングを空にする（書き出しの前後で呼ぶ＝古いフレームを残さない）。非存在は成功扱い。
@@ -3724,6 +3876,11 @@ pub struct SceneInput {
     /// 指定時は frames_base64 より優先＝巨大な base64 を IPC に載せずに済む（#書き出しRangeError）。
     #[serde(default)]
     frames_dir: Option<String>,
+    /// `frames_dir` に置いたはずのコマの数（ADR-0070）。渡されたら、0 番からこの数まで**全部そろっているか**を確かめる。
+    /// ⚠️ 渡さなくても、**番号の抜け**は確かめる（`image2` は抜けた番号で黙って止まり、`tpad` が最後のコマで埋める＝
+    /// 途中から止まった動画が「成功」として出る）。
+    #[serde(default)]
+    expected_frames: Option<u32>,
     /// frames_base64 のフレームレート（未指定なら描画fpsを使う）。
     #[serde(default)]
     fps: Option<u32>,
@@ -4495,6 +4652,13 @@ fn export_video_impl(
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
                 ));
             }
+            // ⚠️ **コマの抜けを確かめる**（ADR-0070）＝複数の窓で描くと、落ちた窓のぶんが抜けうる。
+            if let Some(missing) = first_missing_staged_frame(&frames_dir, s.expected_frames) {
+                return Err(export_failure(
+                    format!("staged frame {missing} missing: {}", frames_dir.display()),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                ));
+            }
             // 窓 Frames（#442）：クリップ元音声（複数動画スロット対応）があればナレーションと全本 amix
             // （音量は WAV へ焼き込む＝job の narration_volume は 1.0）。無ければ従来どおりナレーションのみ。
             let (audio, narr_vol) = if !s.clip_audios.is_empty() {
@@ -4738,7 +4902,8 @@ fn export_video_impl(
                 if !src.exists() {
                     return Err(export_failure(
                         format!("bgm src missing: {}", src.display()),
-                        "動画が見つかりませんでした。もう一度取り込んでください。",
+                        // 動画の元の音だけでなく、取り込んだ音もパスで来る（負荷・耐久の点検 2026-10-22）。
+                        "音や動画のファイルが見つかりませんでした。もう一度取り込んでください。",
                     ));
                 }
                 files.push(src.to_string_lossy().into_owned());
@@ -4916,6 +5081,62 @@ impl Drop for TmpDirCleanup {
 
 #[cfg(test)]
 mod tests {
+    /// 置き場のコマの抜け（ADR-0070）＝途中の抜け・数が足りない、のどちらも見つける。
+    #[test]
+    fn first_missing_staged_frame_finds_gaps_and_short_tails() {
+        let dir = std::env::temp_dir().join(format!("stario_missing_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for i in [0u32, 1, 2, 4] {
+            fs::write(dir.join(format!("frame_{i:05}.png")), b"x").unwrap();
+        }
+        fs::write(dir.join("other.txt"), b"x").unwrap();
+        assert_eq!(first_missing_staged_frame(&dir, None), Some(3));
+        fs::write(dir.join("frame_00003.png"), b"x").unwrap();
+        assert_eq!(first_missing_staged_frame(&dir, None), None);
+        assert_eq!(first_missing_staged_frame(&dir, Some(5)), None);
+        assert_eq!(first_missing_staged_frame(&dir, Some(7)), Some(5));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 同じ絵が続くぶんは、まとめて写せる（書き出しの高速化 2026-10-23）。
+    #[test]
+    fn copy_frame_run_makes_count_identical_frames() {
+        let dir = std::env::temp_dir().join(format!("stario_copy_run_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("frame_00004.png"), b"PNG-4").unwrap();
+        copy_frame_run(&dir, 4, 5, 3).unwrap();
+        for i in 5..8 {
+            assert_eq!(
+                fs::read(dir.join(format!("frame_{i:05}.png"))).unwrap(),
+                b"PNG-4"
+            );
+        }
+        assert!(!dir.join("frame_00008.png").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 前のコマから写したコマは**中身がバイトまで同じ**＝同じ絵（書き出しの高速化 2026-10-22）。
+    /// すでに同じ名前があれば置き換える（書き出しを途中からやり直したときに古いコマを残さない）。
+    #[test]
+    fn copy_frame_file_makes_identical_frame_and_replaces_existing() {
+        let dir =
+            std::env::temp_dir().join(format!("stario_copy_frame_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let from = dir.join("frame_00000.png");
+        let to = dir.join("frame_00001.png");
+        fs::write(&from, b"PNGBYTES-1").unwrap();
+        fs::write(&to, b"OLD").unwrap();
+        copy_frame_file(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"PNGBYTES-1");
+        // 元が無ければ失敗で返す（黙って空のコマを作らない）。
+        assert!(
+            copy_frame_file(&dir.join("frame_09999.png"), &dir.join("frame_00002.png")).is_err()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     /// 書き出しの作業フォルダは、抜けるときに中身ごと消える（#1358＝失敗でも成功でも残さない）。

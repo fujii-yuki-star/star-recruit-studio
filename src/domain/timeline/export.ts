@@ -8,7 +8,7 @@
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { isGoneGeneratedVoice } from '../voice/goneVoices';
-import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, denoisedCachePath, denoiseSourceKey, denoisesClip, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
+import { audioCueOfClipAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, denoisedCachePath, denoiseSourceKey, denoisesClip, normalizedVolumePoints, trackGainOf, volumeExpr } from './audio';
 import { clampVolume } from '../voice/audioMix';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { applyDucking, duckingFactorPoints, fitSpeechSpans, resolveAudioAuto } from '../voice/audioAuto';
@@ -157,7 +157,8 @@ export function duckSpansOf(doc: TimelineProject, auto: ReturnType<typeof resolv
   return fitSpeechSpans(
     doc.clips
       .filter((c) => c.kind === TIMELINE_CLIP_KIND.voice && !!c.voice?.voicePath)
-      .filter((c) => audioCuesAt(doc, c.startSec + c.durationSec / 2).some((q) => q.clipId === c.id))
+      // 1部品ずつ聞く（`audioCuesAt(...).some` だと部品ごとに全部の部品を見る＝部品の数の2乗・負荷試験 2026-10-22）。
+      .filter((c) => audioCueOfClipAt(doc, c, c.startSec + c.durationSec / 2) != null)
       .map((c) => ({ startSec: c.startSec, endSec: clipEndSec(c) })),
     auto,
     VOLUME_POINTS_MAX,
@@ -177,7 +178,7 @@ export function isAudibleRunClip(doc: TimelineProject, clip: TimelineClip): bool
   // 鳴るかどうかの判定（隠した列・隠したクリップ）は再生と同じ関数に委ねる＝規則を2か所に書かない。
   // クリップの真ん中の時刻で見る（区間の端は半開なので、0秒に近いクリップでも必ず入る）。
   const midSec = clip.startSec + clip.durationSec / 2;
-  return audioCuesAt(doc, midSec).some((q) => q.clipId === clip.id);
+  return audioCueOfClipAt(doc, clip, midSec) != null;
 }
 
 /**
@@ -210,7 +211,7 @@ export function timelineAudioRuns(
     if (!isAudibleRunClip(doc, clip)) continue;
     const sourceKey = audioSourceKeyOfClip(clip);
     const midSec = clip.startSec + clip.durationSec / 2;
-    const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
+    const cue = audioCueOfClipAt(doc, clip, midSec);
     if (!sourceKey || !cue) continue;
     // **列の音量**（ADR-0067）＝再生（`audioCuesAt`）と同じ倍率を、一定の音量と音量の変化の点の両方に掛ける。
     const gain = trackGainOf(doc.tracks.find((t) => t.id === clip.trackId));
@@ -226,11 +227,18 @@ export function timelineAudioRuns(
     const expr = volumeExpr(gain === 1 ? pts : pts.map((p) => ({ ...p, volume: p.volume * gain })));
     // **ノイズを減らす部品**（ADR-0068）＝作り置きを**パスで**渡す（プレビューと同じファイル・中身を文字列にしない）。
     const denoisedPath = denoisesClip(doc, clip) && clip.assetId ? denoisedPathOf(doc, clip.assetId) : undefined;
+    // **取り込んだ音・読み上げはパスで**渡す（負荷・耐久の点検 2026-10-22／読み上げは 2026-11-04）＝中身（base64）にしない。
+    // 鳴らす側も中身を読まない（asset:// で鳴らす）。⚠️ **同梱 BGM だけは今までどおり中身**＝プロジェクトの外（アプリの中）にある。
+    const importedPath = sourceKey.startsWith(ASSET_SOURCE_KEY_PREFIX)
+      ? assetFilePathOf(doc, clip.assetId)
+      : clip.kind === TIMELINE_CLIP_KIND.voice
+        ? clip.voice?.voicePath ?? undefined
+        : undefined;
     runs.push({
       clipId: clip.id,
       ...(denoisedPath && clip.assetId
         ? { sourceKey: denoiseSourceKey(clip.assetId), assetPath: denoisedPath, fileExt: DENOISED_EXT }
-        : { sourceKey, fileExt: audioFileExtOf(clip, doc) }),
+        : { sourceKey, ...(importedPath ? { assetPath: importedPath } : {}), fileExt: audioFileExtOf(clip, doc) }),
       delaySec: clip.startSec,
       playSec: clipEndSec(clip) - clip.startSec,
       sourceStartSec: clip.sourceStartSec ?? 0,
@@ -278,6 +286,14 @@ export function timelineAudioRuns(
 
 /** ノイズを減らした作り置きの拡張子（ADR-0068・`denoisedCachePath` と同じ）。 */
 const DENOISED_EXT = 'flac';
+
+/** 取り込んだ音の鍵の頭（`audioSourceKeyOfClip` の `asset:`）。 */
+const ASSET_SOURCE_KEY_PREFIX = 'asset:';
+
+/** 素材の保存先（素材が見つからなければ `undefined`）。 */
+function assetFilePathOf(doc: TimelineProject, assetId: string | null | undefined): string | undefined {
+  return assetId ? doc.assets.find((a) => a.assetId === assetId)?.filePath : undefined;
+}
 
 /** 素材のノイズを減らした作り置きのパス（素材が見つからなければ `undefined`）。 */
 function denoisedPathOf(doc: TimelineProject, assetId: string): string | undefined {

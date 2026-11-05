@@ -7,6 +7,7 @@ import { FlowBar } from "../components/FlowBar";
 import { flowJump } from "../flowSteps";
 import { NoScenesState } from "../components/NoScenesState";
 import { CreditDisplayField } from "../components/CreditDisplayField";
+import { HelpTip } from "../components/HelpTip";
 import { FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -36,7 +37,8 @@ import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { narrationAudioKey, sceneLineVoiceUsable } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
-import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { missingAssetFiles } from "../../infrastructure/assetFs";
+import { sceneBgmSource } from "./sceneBgmSource";
 import { createExportSrcResolver } from "../store/assetExportSrc";
 import { ExportDoneActions } from "../components/ExportDoneActions";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -489,20 +491,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
         if (useProjectStore.getState().exportRun.cancelling) throw new ExportCancelledError(); // BGM準備中の中止も即反映（#380）
-        let audioBase64: string | undefined;
-        let fileExt = "mp3";
-        if (clip.bundledBgmId) {
-          audioBase64 = await readBundledBgmDataUrl(clip.bundledBgmId);
-          fileExt = bgmById(clip.bundledBgmId)?.fileName.split(".").pop()?.toLowerCase() || "mp3";
-        } else if (clip.assetId && pid) {
-          const a = snapAssets.find((x) => x.assetId === clip.assetId);
-          if (a) {
-            audioBase64 = (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
-            fileExt = (a.filePath.split(".").pop() || "mp3").toLowerCase();
-          }
-        }
-        if (audioBase64) {
-          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
+        // 音の出どころ（同梱は中身・自分の BGM はパス＝数百 MB の WAV を文字列にしない）は `sceneBgmSource` の1か所。
+        const source = await sceneBgmSource(clip, snapAssets, pid, { readBundledBgmDataUrl, missingAssetFiles });
+        if (source) {
+          bgmRuns.push({ ...source, volume: clip.volume, ...(clip.volumeExpr ? { volumeExpr: clip.volumeExpr } : {}), delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
           // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
           bgmLoadFailed = true;
@@ -653,10 +645,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
+            {/* 違いは選択肢の名前が言う（「ふつう（…・ファイル小さめ）」）。詳しくは「？」と札へ（使い勝手の点検 2026-10-22＝タイムライン形式と同じ扱い）。 */}
+            <select id="size" className="select" value={size} disabled={busy} title={EXPORT_SIZE_HINT} onChange={(e) => { if (isExportSize(e.target.value)) setExportForm({ size: e.target.value }); }}>
               <ExportSizeOptions full={fullDims} light={hdDims} />
             </select>
-            <p className="field-hint">{EXPORT_SIZE_HINT}</p>
+            <p className="field-hint">大きさの違い <HelpTip label="大きさの違い" text={EXPORT_SIZE_HINT} /></p>
           </div>
 
           <div className="toggle-row">

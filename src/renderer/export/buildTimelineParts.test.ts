@@ -15,6 +15,9 @@ vi.mock('./rasterize', () => ({
 
 const { buildTimelineParts, buildVideoPart, framesDirForSegment } = await import('./buildTimelineParts');
 const { svgToPngDataUrl } = await import('./rasterize');
+const { buildTimelineFrames } = await import('./buildTimelineFrames');
+const { PARALLEL_MIN_FRAMES } = await import('./parallelFrames');
+import type { FrameRange } from './parallelFrames';
 
 const baseOpts = { templateOf: () => undefined, assetSrc: () => 'data:image/png;base64,A', fallbackCredit: 'VOICEVOX:ずんだもん' };
 
@@ -292,8 +295,9 @@ describe('何も時間で変わらない区間は1コマ（#1376）', () => {
       stageFrame: async (dir, index) => { staged.push({ dir, index }); },
     });
     expect(parts).toEqual([
-      { fps: 30, durationSec: 3, framesDir: framesDirForSegment(0) },
-      { fps: 30, durationSec: 2, framesDir: framesDirForSegment(1) },
+      // ⚠️ 置いたはずのコマの数も渡す（ADR-0070＝FFmpeg の前に抜けを確かめる）＝止まっている区間は1コマ。
+      { fps: 30, durationSec: 3, framesDir: framesDirForSegment(0), expectedFrames: 1 },
+      { fps: 30, durationSec: 2, framesDir: framesDirForSegment(1), expectedFrames: 1 },
     ]);
     expect(staged).toEqual([{ dir: framesDirForSegment(0), index: 0 }, { dir: framesDirForSegment(1), index: 0 }]);
   });
@@ -342,4 +346,64 @@ describe('1コマで流す区間の中は、どのコマも同じ絵（#1376）'
       }
     });
   }
+});
+
+// ⚠️ **隠した別の窓でも描く**（ADR-0070）＝置くコマは1窓のときと**同じ置き場・同じ番号・同じ中身**でなければならない
+//   （FFmpeg への渡し方は同じ1本＝動画のバイトが変わらない）。窓の代わりに、同じ関数を同じ材料で回す偽の描き手を使う。
+describe('区間を窓で分けて描く（ADR-0070）', () => {
+  const text = (id: string, startSec: number, durationSec: number, t: string): TimelineClip =>
+    ({ id, kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec, durationSec, x: 0, y: 0, w: 300, h: 80, text: t }) as TimelineClip;
+  // 15 秒（450コマ）ずっと動く文字（キーフレームで横へ）＋1秒ごとに変わる文字＝毎コマ描く区間が1つ。
+  const long = () => doc(
+    [text('clip_100', 0, 15, '動く'), ...Array.from({ length: 15 }, (_, k) => text(`clip_${String(k + 1).padStart(3, '0')}`, k, 1, `字${k}`))],
+    { animations: [{ id: 'anim_001', targetId: 'clip_100', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 15, x: 900 }] }] } as Partial<TimelineProject>,
+  );
+
+  const collect = () => {
+    const placed = new Map<string, string>();
+    return {
+      placed,
+      stageFrame: async (dir: string, index: number, png: string) => { placed.set(`${dir}#${index}`, png); },
+    };
+  };
+
+  it('窓で分けても、置くコマ（置き場・番号・中身）と区間の形は1窓と同じ', async () => {
+    const one = collect();
+    const single = await buildTimelineParts(long(), { ...baseOpts, stageFrame: one.stageFrame });
+    const many = collect();
+    const parallel = await buildTimelineParts(long(), {
+      ...baseOpts,
+      stageFrame: many.stageFrame,
+      parallelDrawersFor: (seg) => [1, 2].map(() => ({
+        draw: async (range: FrameRange, onDone: (n: number) => void) => {
+          await buildTimelineFrames(long(), { ...baseOpts, stageFrame: many.stageFrame, framesDirName: seg.framesDirName, window: range, stageIndexBase: seg.stageIndexBase, stagedVideos: seg.stagedVideos, onProgress: onDone });
+        },
+      })),
+    });
+    expect(parallel).toEqual(single);
+    expect(single[0]).toMatchObject({ expectedFrames: 450 });
+    expect(many.placed.size).toBe(450);
+    expect([...many.placed].sort()).toEqual([...one.placed].sort());
+  });
+
+  it('窓が落ちても、コマは抜けず同じになる（本体が描き直す）', async () => {
+    const one = collect();
+    await buildTimelineParts(long(), { ...baseOpts, stageFrame: one.stageFrame });
+    const many = collect();
+    await buildTimelineParts(long(), {
+      ...baseOpts,
+      stageFrame: many.stageFrame,
+      parallelDrawersFor: () => [{ draw: async () => { throw new Error('window crashed'); } }],
+    });
+    expect([...many.placed].sort()).toEqual([...one.placed].sort());
+  });
+
+  it(`短い区間（${PARALLEL_MIN_FRAMES} コマ未満）は窓に頼まない`, async () => {
+    const asked = vi.fn(() => []);
+    // 5 秒（150コマ）ずっと動く文字＝毎コマ描く区間だが短い。
+    const short = doc([text('clip_001', 0, 5, '動く')], { animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 5, x: 300 }] }] } as Partial<TimelineProject>);
+    const parts = await buildTimelineParts(short, { ...baseOpts, stageFrame: async () => {}, parallelDrawersFor: asked });
+    expect(parts[0]).toMatchObject({ expectedFrames: 150 }); // 毎コマ描く区間になっている（確かめの前提）
+    expect(asked).not.toHaveBeenCalled();
+  });
 });

@@ -10,6 +10,12 @@ vi.mock("../../infrastructure/voiceFs", () => ({
   importVoiceFile: vi.fn(async (_projectId: string, stem: string) => `voices/${stem}.wav`),
   readVoiceDataUrl: vi.fn(async () => null),
 }));
+// ⚠️ **読み上げは置いたファイルを鳴らす**（書き出しの仕上げ 2026-11-04）＝読めるかは `audioPlayUrl`（在るかを確かめる）で決まる。
+//   既定は「読めない」（null）＝作った声は作った中身で鳴らす（アプリの外と同じ受け皿）。
+vi.mock("../../infrastructure/assetFs", async (orig) => ({
+  ...(await orig<typeof import("../../infrastructure/assetFs")>()),
+  audioPlayUrl: vi.fn(async () => null),
+}));
 vi.mock("../../infrastructure/projectFs", () => ({
   saveProjectDoc: vi.fn(async () => {}),
   listProjectSummaries: vi.fn(async () => []),
@@ -114,8 +120,8 @@ describe("まとめて声を作る：作成済みでも音が読めないもの�
   // ⚠️ **先に音をそろえてから見る**＝開いた直後は画面がまだ音を読んでいない（`audioSrcByKey` が空）。そろえずに見ると、
   //   ファイルがある作成済みまで「読めない」と見なして、作った声を全部作り直してしまう。
   it("開いた直後でも、ファイルのある作成済みは作り直さない（先に音を読みにいく）", async () => {
-    const { readVoiceDataUrl } = await import("../../infrastructure/voiceFs");
-    vi.mocked(readVoiceDataUrl).mockImplementation(async (_p: string, path: string) => (path === "voices/clip_002.wav" ? "wav" : null));
+    const { audioPlayUrl } = await import("../../infrastructure/assetFs");
+    vi.mocked(audioPlayUrl).mockImplementation(async (_p: string, path: string) => (path === "voices/clip_002.wav" ? "asset://voices/clip_002.wav" : null));
     useTimelineStore.setState({
       doc: doc([generated("clip_001", 0), generated("clip_002", 3)]),
       audioSrcByKey: {},
@@ -126,7 +132,7 @@ describe("まとめて声を作る：作成済みでも音が読めないもの�
     for (let i = 0; i < 4; i += 1) { await flush(); synth.resolveAll(); }
     await run;
     expect(synth.started, "ファイルのある作成済みまで作り直した").toBe(1);
-    vi.mocked(readVoiceDataUrl).mockImplementation(async () => null);
+    vi.mocked(audioPlayUrl).mockImplementation(async () => null);
   });
 });
 
@@ -323,5 +329,57 @@ describe("voiceClipNeedsVoice / timelineVoiceProgress（#1019 ⑥）", () => {
   it("進み具合は、文のある読み上げだけで数える", () => {
     const clips = [voiceClip("a", "あ", "generated"), voiceClip("b", "い"), voiceClip("c", "   ")];
     expect(timelineVoiceProgress(clips)).toEqual({ done: 1, total: 2 });
+  });
+});
+
+// ⚠️ **まとめて作った声は、取り消しの履歴を1つだけ使う**（負荷・耐久の点検 2026-10-22）＝1本ごとに積むと、
+//   上限（50）を声だけで使い切り、その前の自分の編集が取り消せなくなる。
+describe("まとめて声を作る：取り消しの履歴", () => {
+  const statuses = () => useTimelineStore.getState().doc!.clips.map((c) => c.voice?.status);
+
+  it("何本作っても履歴は1つ増えるだけ・1回の取り消しで作る前に戻る", async () => {
+    useTimelineStore.setState({ history: { past: [], future: [] } } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started).toBe(3);
+    expect(statuses()).toEqual(["generated", "generated", "generated"]);
+    expect(useTimelineStore.getState().history.past, "1本ごとに積んでいる").toHaveLength(1);
+    useTimelineStore.getState().undo();
+    expect(statuses(), "取り消しで作る前に戻らない").toEqual(["none", "none", "none"]);
+  });
+
+  it("作っている間に別の記録が入ったら、その後の声は新しく1つ積む（その記録の取り消しで声まで消さない）", async () => {
+    useTimelineStore.setState({ history: { past: [], future: [] } } as never);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    await flush(); synth.resolveAll(); await flush(); await flush();
+    // 1本目ができた後に、利用者の編集が1つ記録された（ここでは履歴に1つ積んだ形で表す）。
+    const h = useTimelineStore.getState().history;
+    expect(h.past).toHaveLength(1);
+    useTimelineStore.setState({ history: { past: [...h.past, useTimelineStore.getState().doc!], future: [] } } as never);
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(synth.started).toBe(3);
+    const past = useTimelineStore.getState().history.past;
+    expect(past, "間の記録に合流した").toHaveLength(3);
+    // 最後の取り消し＝2本目以降だけが消え、1本目は残る。
+    useTimelineStore.getState().undo();
+    expect(statuses()).toEqual(["generated", "none", "none"]);
+  });
+});
+
+// ⚠️ **作った声は、置いたファイルを鳴らす**（書き出しの仕上げ 2026-11-04）＝作った中身（data URL）を持ち続けない。
+describe("作った声の鳴らし方", () => {
+  it("置いたファイルが読めれば、そのファイルの URL で鳴らす（中身は持たない）", async () => {
+    const { audioPlayUrl } = await import("../../infrastructure/assetFs");
+    vi.mocked(audioPlayUrl).mockImplementation(async (_p: string, path: string) => `asset://${path}?t=1`);
+    const synth = gatedSynth();
+    const run = useTimelineStore.getState().generateAllVoices();
+    for (let i = 0; i < 6; i += 1) { await flush(); synth.resolveAll(); }
+    await run;
+    expect(useTimelineStore.getState().audioSrcByKey["voice:voices/clip_001.wav"]).toBe("asset://voices/clip_001.wav?t=1");
+    vi.mocked(audioPlayUrl).mockImplementation(async () => null);
   });
 });

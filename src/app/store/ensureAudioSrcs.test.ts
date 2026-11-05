@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../infrastructure/assetFs", async (orig) => ({
   ...(await orig<typeof import("../../infrastructure/assetFs")>()),
-  readAssetDataUrl: vi.fn(async () => "data:audio/mp3;base64,NEW"),
+  audioPlayUrl: vi.fn(async () => "data:audio/mp3;base64,NEW"),
 }));
 vi.mock("../../infrastructure/projectFs", () => ({
   saveProjectDoc: vi.fn(async () => {}),
@@ -14,7 +14,7 @@ vi.mock("../../infrastructure/projectFs", () => ({
   deleteProjectDoc: vi.fn(), loadProjectDoc: vi.fn(async () => ""),
 }));
 
-import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { audioPlayUrl } from "../../infrastructure/assetFs";
 import { useTimelineStore } from "./timelineStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
@@ -53,22 +53,22 @@ describe("ensureAudioSrcs（#1061）", () => {
   it("もう用意してある音源は読まない", async () => {
     useTimelineStore.setState({ audioSrcByKey: { "asset:asset_001": "data:audio/mp3;base64,OLD" } } as never);
     await useTimelineStore.getState().ensureAudioSrcs();
-    expect(vi.mocked(readAssetDataUrl), "もうあるのに読み直した").not.toHaveBeenCalled();
+    expect(vi.mocked(audioPlayUrl), "もうあるのに読み直した").not.toHaveBeenCalled();
     expect(useTimelineStore.getState().audioSrcByKey["asset:asset_001"]).toBe("data:audio/mp3;base64,OLD");
   });
 
   // ⚠️ **読めなかったものは二度とたのまない**（`11 §7.6.2.2`）＝毎回の描き直しで読みに行かない。
   it("読めなかった音源は、もう一度たのまない", async () => {
-    vi.mocked(readAssetDataUrl).mockResolvedValue(null);
+    vi.mocked(audioPlayUrl).mockResolvedValue(null);
     await useTimelineStore.getState().ensureAudioSrcs();
     await useTimelineStore.getState().ensureAudioSrcs();
-    expect(vi.mocked(readAssetDataUrl).mock.calls.length, "何度もたのんだ").toBe(1);
+    expect(vi.mocked(audioPlayUrl).mock.calls.length, "何度もたのんだ").toBe(1);
   });
 
   // ⚠️ **待っている間に別の動画を開いたら、そちらへは書かない**（取り込みと同じ判定位置）。
   it("待っている間に別の動画を開いたら、そちらへは書かない", async () => {
     const holder: { release?: (v: string | null) => void } = {};
-    vi.mocked(readAssetDataUrl).mockImplementation(() => new Promise((r) => { holder.release = r; }));
+    vi.mocked(audioPlayUrl).mockImplementation(() => new Promise((r) => { holder.release = r; }));
     const run = useTimelineStore.getState().ensureAudioSrcs();
     useTimelineStore.setState({ doc: { ...doc([]), projectId: "proj_20260907_002" } } as never);
     holder.release?.("data:audio/mp3;base64,NEW");

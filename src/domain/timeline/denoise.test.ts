@@ -110,7 +110,8 @@ describe('書き出し（作り置きをパスで渡す）', () => {
   it('切り替えが無ければ今までどおり（元の素材）', () => {
     const { runs } = timelineAudioRuns(doc([rec(), movie()]));
     expect(runs.find((r) => r.clipId === 'clip_001')).toMatchObject({ sourceKey: 'asset:asset_001', fileExt: 'wav' });
-    expect(runs.find((r) => r.clipId === 'clip_001')!.assetPath).toBeUndefined();
+    // 元の素材もパスで渡す（取り込んだ音は中身を文字列にしない・負荷・耐久の点検 2026-10-22）。作り置きのパスではない。
+    expect(runs.find((r) => r.clipId === 'clip_001')!.assetPath).toBe('assets/asset_001.wav');
     expect(runs.find((r) => r.clipId === 'clip_002')).toMatchObject({ assetPath: 'assets/asset_002.mp4', fileExt: 'mp4' });
   });
 });

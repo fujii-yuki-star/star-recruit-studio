@@ -41,3 +41,17 @@ export async function voicevoxReady(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 声を使う画面を開いたとき、同梱の声のエンジンを**裏で**起こしておく（ADR-0071）。待たない・失敗しても何もしない
+ *（声を作るときに改めて起動して待つ＝そこで断りが出る）。⚠️ **アプリの外（ブラウザ開発）では何もしない**。
+ */
+export async function warmVoiceEngine(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    // ⚠️ 接続先を設定していれば同梱のエンジンを起こさない（判断は Rust 側＝決定3）。
+    await invoke('voicevox_warm', { baseUrl: getVoicevoxUrl() || null });
+  } catch {
+    // 裏での準備なので知らせない。
+  }
+}

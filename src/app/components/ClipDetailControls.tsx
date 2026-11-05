@@ -1,4 +1,5 @@
 import type { Asset, Clip, SlotClipOverride } from "../../domain/project/types";
+import { HelpTip } from "./HelpTip";
 import { clampClipTime } from "../../domain/asset/clip";
 import { formatDuration } from "../../domain/format/duration";
 import {
@@ -41,8 +42,9 @@ export function ClipDetailControls({
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
-        ▶ 動画素材です。仕上がり確認では、再生すると動画が流れます（停止中は表示されません）。書き出しにも動画が入ります。
-        {dur != null && `（長さ：約${formatDuration(dur)}）`}
+        {/* 1行に縮める（使い勝手の点検 2026-10-22＝素材ごとに常に出ていた）。続きは「？」へ。 */}
+        ▶ 動画素材{dur != null && `（約${formatDuration(dur)}）`}{" "}
+        <HelpTip label="動画素材の説明" text="仕上がり確認では、再生すると動画が流れます（停止中は表示されません）。書き出しにも動画が入ります。" />
       </p>
       {scope === "material" && (
         // 素材の既定を編集＝全場面に効く・取り消せない（ADR-0028 D3・§2-5）。場面編集側（scope='scene'）は per-use＝Undo 可。

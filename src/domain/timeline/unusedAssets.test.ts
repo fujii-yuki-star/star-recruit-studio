@@ -64,3 +64,23 @@ describe('withoutAssets', () => {
     expect(withoutAssets(d, new Set(['asset_999']))).toBe(d);
   });
 });
+
+// 文書ごとの作り置き（負荷試験 2026-10-22）＝取り消しの履歴の文書は変わらないので、作り置いた答えを使う。
+// ⚠️ 作り置きは**素材の一覧が同じとき**だけ使う＝素材が増えたら数え直す（増えた素材を「使っていない」と取り違えない）。
+describe('unusedTimelineAssetIds の作り置き', () => {
+  it('同じ文書で素材の一覧が変わったら数え直す', () => {
+    const d = doc([photo('asset_001'), photo('asset_004', 'clip_002')]);
+    expect(unusedTimelineAssetIds(d)).toEqual(['asset_002', 'asset_0021', 'asset_003']);
+    // 同じ文書に素材だけ足す（作り置きは文書ごと）＝鍵が素材の一覧を見ていないと、asset_004 を「使っていない」と取り違える
+    d.assets.push({ ...d.assets[0], assetId: 'asset_004', filePath: 'assets/asset_004.png' });
+    expect(unusedTimelineAssetIds(d)).toEqual(['asset_002', 'asset_0021', 'asset_003']);
+  });
+
+  it('履歴の文書は何度聞いても同じ答え（作り置きを使っても変わらない）', () => {
+    const history = [doc([photo('asset_002')]), doc([photo('asset_003')])];
+    const now = doc([photo('asset_001')]);
+    const first = unusedTimelineAssetIds(now, history);
+    expect(unusedTimelineAssetIds(now, history)).toEqual(first);
+    expect(first).toEqual(['asset_0021']);
+  });
+});

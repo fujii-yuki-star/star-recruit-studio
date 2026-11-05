@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "render-window",
+  "description": "Capability for the hidden export render windows (ADR-0070): receive jobs and report back by events",
+  "windows": ["render-*"],
+  "permissions": [
+    "core:default"
+  ]
+}

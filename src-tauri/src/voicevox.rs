@@ -3,6 +3,7 @@
 // 既定 http://localhost:50021（設定の接続先 base_url → 環境変数 VOICEVOX_URL の順で上書き）。/audio_query → /synthesis で WAV を得る。
 use base64::Engine as _;
 use std::sync::OnceLock;
+use tauri::Manager;
 
 fn voicevox_base() -> String {
     std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string())
@@ -106,18 +107,32 @@ impl VoiceStyle {
 #[tauri::command]
 pub async fn voicevox_ready(
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
-    let base = base_url
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| engine.base_url())
-        .unwrap_or_else(voicevox_base);
-    Ok(http_client()
-        .get(format!("{base}/version"))
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false))
+    // ⚠️ **待たずに答える**（待つのは呼ぶ側）＝同梱のエンジンが動いていなければ起動だけ始めて「まだ」と言う（ADR-0071）。
+    if let Some(b) = user_base(base_url) {
+        return Ok(answers(&b).await);
+    }
+    if !crate::voicevox_engine::is_bundled(&app) {
+        return Ok(answers(&voicevox_base()).await);
+    }
+    crate::voicevox_engine::kick_bundled_engine(&app);
+    let url = app
+        .state::<crate::voicevox_engine::EngineState>()
+        .base_url();
+    Ok(match url {
+        Some(u) => answers(&u).await,
+        None => false,
+    })
+}
+
+/// 声を使う画面を開いたとき、同梱エンジンを**裏で**起こしておく（待たない・ADR-0071 決定1）。
+/// 最初の1回の待ちを隠すため。設定の接続先があれば何もしない（決定3）。
+#[tauri::command]
+pub fn voicevox_warm(base_url: Option<String>, app: tauri::AppHandle) {
+    if user_base(base_url).is_none() {
+        crate::voicevox_engine::kick_bundled_engine(&app);
+    }
 }
 
 /// テキストを VOICEVOX で音声合成し、WAV の data URL を返す。
@@ -129,13 +144,12 @@ pub async fn synthesize_voice(
     pitch: f64,
     intonation: f64,
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    // 接続先: 設定の base_url（上級者）＞ 同梱エンジン（自動起動）＞ 環境変数 ＞ 既定 50021。
-    let base = base_url
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| engine.base_url())
-        .unwrap_or_else(voicevox_base);
+    // 接続先: 設定の base_url（上級者）＞ 同梱エンジン（使うときに起動・ADR-0071）＞ 環境変数 ＞ 既定 50021。
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let client = http_client();
     let speaker_str = speaker.to_string();
 
@@ -189,21 +203,68 @@ pub async fn synthesize_voice(
 // オプションが無い）ので、**丸ごと入れ替える API（`import_user_dict` の override）は使わない**
 // ＝アプリが関与する語だけを1語ずつ足す/直す/消す（決定3）。
 
-/// 接続先の解決（合成と同じ順＝設定の接続先 → 同梱エンジン → 環境変数 → 既定）。
-fn resolve_base(base_url: Option<String>, engine: &crate::voicevox_engine::EngineState) -> String {
-    base_url
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| engine.base_url())
-        .unwrap_or_else(voicevox_base)
+/// 同梱エンジンが起動して応えるまで待つ上限（モデルの読み込みを含む・ADR-0071）。
+const ENGINE_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// 起動を待つ間に尋ねる間隔。
+const ENGINE_START_POLL: std::time::Duration = std::time::Duration::from_millis(300);
+/// 「応えるか」を尋ねる1回の上限（起動中は拒まれてすぐ返る）。
+const ENGINE_PING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 上級者が設定した接続先（空欄は無い扱い）。
+fn user_base(base_url: Option<String>) -> Option<String> {
+    base_url.filter(|s| !s.trim().is_empty())
+}
+
+/// その接続先がいま応えるか。
+async fn answers(base: &str) -> bool {
+    http_client()
+        .get(format!("{base}/version"))
+        .timeout(ENGINE_PING_TIMEOUT)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// 接続先の解決（設定の接続先 → 同梱エンジン → 環境変数 → 既定）。**すべての口がここを通る**。
+///
+/// ⚠️ **同梱エンジンは、動いていなければここで起動し、応えるまで待つ**（ADR-0071 決定1）＝起動時には起こしていない。
+/// 待ちきれない・起動に失敗したときは今までどおりの接続先を返す（頼んだ口が「つながりません」を出す＝§2-5）。
+/// ⚠️ **設定の接続先があれば同梱のエンジンを起こさない**（決定3）。
+async fn resolve_base(app: &tauri::AppHandle, base_url: Option<String>) -> String {
+    if let Some(b) = user_base(base_url) {
+        return b;
+    }
+    if !crate::voicevox_engine::is_bundled(app) {
+        return voicevox_base();
+    }
+    crate::voicevox_engine::kick_bundled_engine(app);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let deadline = std::time::Instant::now() + ENGINE_START_TIMEOUT;
+    loop {
+        match engine.base_url() {
+            Some(u) if answers(&u).await => return u,
+            Some(_) => {}
+            // 起動の糸が終わったのに番号が無い＝起動に失敗した（記録は起動の側が残す）。
+            None if !engine.is_starting() => return voicevox_base(),
+            None => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return engine.base_url().unwrap_or_else(voicevox_base);
+        }
+        tokio::time::sleep(ENGINE_START_POLL).await;
+    }
 }
 
 /// エンジンの読み方辞書を丸ごと読む（本文をそのまま返す＝解釈は呼び出し側＝§2-2）。
 #[tauri::command]
 pub async fn voicevox_user_dict_list(
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    let base = resolve_base(base_url, &engine);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let res = http_client()
         .get(format!("{base}/user_dict"))
         .send()
@@ -225,9 +286,11 @@ pub async fn voicevox_user_dict_add(
     accent_type: u32,
     priority: u32,
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    let base = resolve_base(base_url, &engine);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let res = http_client()
         .post(format!("{base}/user_dict_word"))
         .query(&[
@@ -264,9 +327,11 @@ pub async fn voicevox_user_dict_update(
     accent_type: u32,
     priority: u32,
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
-    let base = resolve_base(base_url, &engine);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let res = http_client()
         .put(format!("{base}/user_dict_word/{word_uuid}"))
         .query(&[
@@ -295,9 +360,11 @@ pub async fn voicevox_user_dict_update(
 pub async fn voicevox_user_dict_delete(
     word_uuid: String,
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<bool, String> {
-    let base = resolve_base(base_url, &engine);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let res = http_client()
         .delete(format!("{base}/user_dict_word/{word_uuid}"))
         .send()
@@ -335,9 +402,11 @@ pub async fn voicevox_synthesize_with_accent(
     speaker: u32,
     style: VoiceStyle,
     base_url: Option<String>,
-    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    let base = resolve_base(base_url, &engine);
+    let engine = app.state::<crate::voicevox_engine::EngineState>();
+    let _use = engine.begin_use();
+    let base = resolve_base(&app, base_url).await;
     let client = http_client();
     let speaker_str = speaker.to_string();
 

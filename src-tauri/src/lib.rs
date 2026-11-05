@@ -15,6 +15,7 @@ mod packs;
 mod proc;
 mod project_import;
 mod startup;
+mod sysmem;
 mod transcribe;
 mod trouble_log;
 mod voicevox;
@@ -1528,8 +1529,8 @@ pub fn run() {
             // それも残したい（VOICEVOX の起動・書き出しの後片づけ）。
             trouble_log::init(app.handle());
             ensure_asset_scope_dirs(app.handle());
-            // 同梱 VOICEVOX ENGINE を自動起動（同梱が無ければ何もしない＝手動起動/設定の接続先へフォールバック・ADR-0005/#149）。
-            voicevox_engine::start_bundled_engine(app.handle());
+            // ⚠️ 同梱 VOICEVOX ENGINE は**ここでは起こさない**（ADR-0071）＝声を使うときに起動し、10 分使わなければ止める。
+            //   起動時に起こすと、声を作らない間も書き出しの間も約 0.5GB を握り続ける。
             // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
             ffmpeg::cleanup_stale_export_dirs(app.handle());
             packs::cleanup_pack_staging(app.handle());
@@ -1552,6 +1553,7 @@ pub fn run() {
             save_project,
             project_backup_time,
             export_free_space,
+            sysmem::memory_status,
             restore_project_backup,
             list_restore_points,
             take_restore_point,
@@ -1595,6 +1597,8 @@ pub fn run() {
             ffmpeg::begin_export,
             ffmpeg::cancel_export,
             ffmpeg::stage_export_frame,
+            ffmpeg::copy_export_frames,
+            ffmpeg::stage_export_frame_png,
             ffmpeg::clear_export_frames_stage,
             ffmpeg::stage_clip_frames,
             ffmpeg::read_export_frame,
@@ -1622,6 +1626,7 @@ pub fn run() {
             assets::load_template_assets,
             assets::delete_template_asset,
             voicevox::voicevox_ready,
+            voicevox::voicevox_warm,
             voicevox::synthesize_voice,
             ai::save_api_key,
             ai::has_api_key,

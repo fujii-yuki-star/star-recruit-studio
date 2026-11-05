@@ -36,6 +36,7 @@ function stubAudio(): HTMLAudioElement[] {
     const el = {
       volume: 1, muted: false, currentTime: 0, playbackRate: 1, loop: false,
       play: vi.fn(() => Promise.resolve()), pause: vi.fn(),
+      removeAttribute: vi.fn(), load: vi.fn(),
     } as unknown as HTMLAudioElement;
     made.push(el);
     return el;
@@ -137,5 +138,67 @@ describe("useTimelineAudio を使わない（別窓）", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
     expect(pause).not.toHaveBeenCalled();
+  });
+});
+
+// ⚠️ **止めた音は音源を手放す**（負荷・耐久の点検 2026-10-22）＝前は `pause()` だけで、要素が音源
+//   （数十 MB になる data URL も）と再生器を、捨てられるまで掴んでいた。
+describe("止めた音の後片づけ", () => {
+  it("再生を止めたら、鳴らしていた要素の音源を外して手放す", () => {
+    const { ctx } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const made = stubAudio();
+    play(0.5);
+    const { rerender } = renderHook(() => useTimelineAudio());
+    expect(made).toHaveLength(1);
+    useTimelineStore.setState({ isPlaying: false });
+    rerender();
+    expect(made[0].pause).toHaveBeenCalled();
+    expect(made[0].removeAttribute).toHaveBeenCalledWith("src");
+    expect(made[0].load).toHaveBeenCalled();
+  });
+
+  it("区間を出た部品の要素も手放す", () => {
+    const { ctx } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const made = stubAudio();
+    play(0.5);
+    const { rerender } = renderHook(() => useTimelineAudio());
+    useTimelineStore.setState({ playheadSec: 6 }); // 0〜5 秒の部品の外
+    rerender();
+    expect(made[0].removeAttribute).toHaveBeenCalledWith("src");
+  });
+
+  // ⚠️ 止めると鳴らし始めの約束が打ち切られて断られる。それを「鳴らせない」と覚えると、止めて再生し直したとき
+  //   その部品だけ二度と鳴らない。
+  it("止めた後に鳴らし始めが打ち切られても、次の再生ではまた鳴らす", async () => {
+    const { ctx } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const made = stubAudio();
+    play(0.5);
+    let rejectFirst: (e: Error) => void = () => {};
+    const { rerender } = renderHook(() => useTimelineAudio());
+    // いったん止めてから、次に作る要素の鳴らし始めを「まだ終わっていない」約束にする。
+    useTimelineStore.setState({ isPlaying: false });
+    rerender();
+    (window as any).Audio = function (this: any) {
+      const el = {
+        volume: 1, muted: false, currentTime: 0, playbackRate: 1, loop: false,
+        play: vi.fn(() => new Promise<void>((_r, rej) => { rejectFirst = rej; })), pause: vi.fn(),
+        removeAttribute: vi.fn(), load: vi.fn(),
+      } as unknown as HTMLAudioElement;
+      made.push(el);
+      return el;
+    } as unknown as typeof Audio;
+    useTimelineStore.setState({ isPlaying: true });
+    rerender();
+    expect(made).toHaveLength(2);
+    useTimelineStore.setState({ isPlaying: false });
+    rerender();
+    rejectFirst(new Error("AbortError"));
+    await Promise.resolve(); await Promise.resolve();
+    useTimelineStore.setState({ isPlaying: true });
+    rerender();
+    expect(made, "打ち切られた部品を、鳴らせないものとして飛ばした").toHaveLength(3);
   });
 });

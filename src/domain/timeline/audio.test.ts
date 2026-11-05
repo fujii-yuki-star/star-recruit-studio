@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { audioAssetDurationSec, audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, audioSourcesOf } from './audio';
+import { audioAssetDurationSec, audioCueOfClipAt, audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, audioSourcesOf } from './audio';
+import { isAudibleRunClip, timelineExportBlockers } from './export';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
   return { id, kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, ...over };
@@ -208,5 +209,59 @@ describe("audioAssetDurationSec（#1348）", () => {
     expect(audioAssetDurationSec({ metadata: { durationSec: 0 } }, 2)).toBe(2);
     expect(audioAssetDurationSec({ metadata: { durationSec: Number.NaN } }, undefined)).toBeUndefined();
     expect(audioAssetDurationSec({}, -1)).toBeUndefined();
+  });
+});
+
+// ⚠️ **部品の数の2乗にしない**（負荷試験 2026-10-22）＝「この部品は鳴るか」を部品ごとに `audioCuesAt(...).some` で聞くと、
+// 部品ごとに全部の部品を見る。部品 2216 の動画で1回の編集に約1.5秒かかった（書き出し前の門は編集のたびに見直される）。
+describe('audioCueOfClipAt（1部品ぶん）', () => {
+  const mixed = () => doc({
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+      { id: 'track_003', kind: TRACK_KIND.audio, hidden: true },
+      { id: 'track_004', kind: TRACK_KIND.audio, volume: 1.5 },
+    ],
+    clips: [
+      clip('clip_001', { startSec: 0, durationSec: 4 }),
+      voiceClip('clip_002', { startSec: 1, durationSec: 2 }),
+      clip('clip_003', { startSec: 0, durationSec: 9, trackId: 'track_003' }),
+      clip('clip_004', { startSec: 2, durationSec: 6, trackId: 'track_004', speed: 2, sourceStartSec: 1 }),
+      clip('clip_005', { startSec: 0, durationSec: 9, hidden: true }),
+    ],
+  });
+
+  it('全部の部品に当てて集めると audioCuesAt と同じ（時刻をいくつ変えても）', () => {
+    const d = mixed();
+    for (const t of [0, 0.5, 1, 2.99, 3, 4, 7.9, 8, 10]) {
+      const each = d.clips.map((c) => audioCueOfClipAt(d, c, t)).filter((c) => c != null);
+      expect(each, `t=${t}`).toEqual(audioCuesAt(d, t));
+    }
+  });
+
+  it('列の配列をその場で書き換えても、古い材料（鳴る列・列の音量）を使わない', () => {
+    const d = mixed();
+    expect(audioCueOfClipAt(d, d.clips[2], 1)).toBeNull(); // 隠した列
+    d.tracks.push({ id: 'track_005', kind: TRACK_KIND.audio });
+    d.clips[2] = { ...d.clips[2], trackId: 'track_005' };
+    expect(audioCueOfClipAt(d, d.clips[2], 1)?.clipId).toBe('clip_003');
+  });
+
+  // ⚠️ **時間では測らない**＝ほかの検査と並んで走ると時間がぶれて、たまに落ちた（実際に落ちた）。
+  //   部品の項目を**読んだ回数**を数える＝機械の混み具合によらず同じ数になる。
+  it('部品が4倍になっても、鳴るかの判定で部品を読む回数は4倍程度（2乗の16倍にならない）', () => {
+    const reads = (n: number): number => {
+      let count = 0;
+      const clips = Array.from({ length: n }, (_, i) =>
+        new Proxy(voiceClip(`clip_${String(i + 1).padStart(4, '0')}`, { startSec: i, durationSec: 1 }), {
+          get(t, k, r) { count += 1; return Reflect.get(t, k, r); },
+        }));
+      const d = doc({ clips });
+      for (const c of d.clips) isAudibleRunClip(d, c);
+      timelineExportBlockers(d);
+      return count;
+    };
+    const ratio = reads(800) / reads(200);
+    expect(ratio, `部品 800 は 200 の ${ratio.toFixed(1)} 倍読んだ`).toBeLessThan(6);
   });
 });

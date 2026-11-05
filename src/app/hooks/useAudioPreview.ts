@@ -3,6 +3,7 @@
 // - 現在鳴っている音源キー（playingKey）を返し、ボタンを「再生↔停止」に切り替えられるようにする。
 // play(key, url) は同じ key を再度呼ぶと停止（トグル）。異なる key なら前を止めて新しく鳴らす。
 import { useCallback, useEffect, useRef, useState } from "react";
+import { releaseAudio } from "./releaseAudio";
 
 export interface AudioPreview {
   /** 現在鳴っている音源のキー（無音なら null）。ボタンの「再生↔停止」切替に使う。 */
@@ -19,7 +20,7 @@ export function useAudioPreview(): AudioPreview {
   const [playingKey, setPlayingKey] = useState<string | null>(null);
 
   const stop = useCallback((): void => {
-    audioRef.current?.pause();
+    if (audioRef.current) releaseAudio(audioRef.current); // 止めた音は使い回さない＝音源を手放す
     audioRef.current = null;
     keyRef.current = null;
     setPlayingKey(null);
@@ -38,8 +39,10 @@ export function useAudioPreview(): AudioPreview {
         if (audioRef.current === a) stop(); // 鳴り終わったら停止状態へ（ボタンを再生に戻す）
       };
       void a.play().catch((e) => {
+        // ⚠️ **止めた・次を鳴らした後の「打ち切られた」は失敗ではない**＝案内を出さない。
+        if (audioRef.current !== a) return;
         console.warn("[useAudioPreview] 再生に失敗", e);
-        if (audioRef.current === a) stop();
+        stop();
         onError?.();
       });
     },

@@ -3,7 +3,7 @@
 // ⚠️ 埋め込まないと、`<img>` に読ませた SVG は Windows に無い字体をすべて既定の字体で焼く（実機で確かめた）。
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetExportFontEmbedder, svgToPngDataUrl } from './rasterize';
+import { FONT_CACHE_IDLE_MS, resetExportFontEmbedder, svgToPngDataUrl } from './rasterize';
 
 let blobs: Blob[] = [];
 
@@ -51,5 +51,35 @@ describe('svgToPngDataUrl（字体の埋め込み・ADR-0062）', () => {
     resetExportFontEmbedder();
     await expect(svgToPngDataUrl(svg, 10, 10)).rejects.toThrow(/文字の形を読み込めませんでした。.*書き出してください。/);
     expect(blobs).toHaveLength(0);
+  });
+});
+
+// ⚠️ **しばらく焼かなければ、覚えた字体を捨てる**（負荷・耐久の点検 2026-10-22）＝前は次の書き出しまで
+//   字体のファイル丸ごと（数 MB〜20MB 余り）を持ちっぱなしだった。捨てても次に焼くときに読み直すだけ。
+describe('覚えた字体の後片づけ', () => {
+  it('続けて焼く間は読み直さず、しばらく焼かなければ捨てる（次は読み直す）', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null;
+      set src(_v: string) { void Promise.resolve().then(() => this.onload?.()); }
+    });
+    try {
+      const fetched = vi.mocked(fetch);
+      await svgToPngDataUrl(svg, 10, 10);
+      const first = fetched.mock.calls.length;
+      expect(first).toBeGreaterThan(0);
+      vi.advanceTimersByTime(FONT_CACHE_IDLE_MS - 1_000);
+      await svgToPngDataUrl(svg, 10, 10);
+      expect(fetched.mock.calls.length, "続けて焼くのに読み直した").toBe(first);
+      // 最後に焼いてから数え直す＝少し前に焼いたばかりなので、まだ捨てない。
+      vi.advanceTimersByTime(FONT_CACHE_IDLE_MS - 1_000);
+      await svgToPngDataUrl(svg, 10, 10);
+      expect(fetched.mock.calls.length, "使っている最中に捨てた").toBe(first);
+      vi.advanceTimersByTime(FONT_CACHE_IDLE_MS);
+      await svgToPngDataUrl(svg, 10, 10);
+      expect(fetched.mock.calls.length, "しばらく焼かなくても捨てていない").toBe(first * 2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

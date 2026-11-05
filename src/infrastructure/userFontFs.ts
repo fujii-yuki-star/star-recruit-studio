@@ -113,6 +113,14 @@ export function setPackFontSources(fonts: readonly { id: string; packId: string;
   for (const [id, src] of next) packFontSources.set(id, src);
 }
 
+/**
+ * いま入っているパックの文字の形の置き場（ADR-0070＝書き出しのコマを描く別の窓へ渡す）。
+ * ⚠️ 別の窓は本体と JS の状態を共有しない＝渡さないと、別の窓だけパックの字が読めず違う字で焼く。
+ */
+export function packFontSourceList(): { id: string; packId: string; file: string; sha256: string }[] {
+  return [...packFontSources].map(([id, s]) => ({ id, ...s }));
+}
+
 /** いま入っているパックの文字の形の id（書き出しの前にまとめて読むため）。 */
 export function packFontIds(): string[] {
   return [...packFontSources.keys()];

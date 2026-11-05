@@ -73,6 +73,11 @@ export interface ExportSceneInput {
   framesBase64?: string[];
   /** ステージング済みフレームの相対ディレクトリ名（stageExportFrame で書き出し済み）。framesBase64 より優先＝巨大IPC回避。 */
   framesDir?: string;
+  /**
+   * `framesDir` に置いたはずのコマの数（ADR-0070）。渡すと Rust が 0 番からこの数まで全部そろっているかを確かめる
+   * （窓で分けて描くと、落ちた窓のぶんが抜けうる＝抜けたまま流すと途中から止まった動画が「成功」として出る）。
+   */
+  expectedFrames?: number;
   /** framesBase64 のフレームレート（既定 30）。 */
   fps?: number;
   durationSec: number;
@@ -205,7 +210,45 @@ export async function cancelExport(): Promise<void> {
  */
 export async function stageExportFrame(dirName: string, frameIndex: number, dataBase64: string): Promise<void> {
   await invoke('stage_export_frame', { dirName, frameIndex, dataBase64 });
-  await accountStagedFrame(dataBase64);
+  await accountStagedFrame(base64Bytes(dataBase64));
+}
+
+/**
+ * **前のコマと同じ絵のコマ**を、前のコマのファイルから作る（書き出しの高速化・2026-10-22）。
+ * 描く・PNG にする・base64 で運ぶ、を省く（同じ SVG から作った PNG は同じ＝絵は変わらない）。
+ * ⚠️ 空きの見張りは**複写したのと同じ大きさ**で数える＝ハードリンクで済んでも多めに見積もる側（止めどきが今より遅れない）。
+ */
+export async function copyExportFrames(
+  dirName: string,
+  fromIndex: number,
+  toIndex: number,
+  count: number,
+  pngBytes: number,
+): Promise<void> {
+  await invoke('copy_export_frames', { dirName, fromIndex, toIndex, count });
+  // 見張りは1枚ずつ数える（区切りの回に空きを見るのは今までどおり）。
+  for (let k = 0; k < count; k += 1) await accountStagedFrame(pngBytes);
+}
+
+/**
+ * 1コマの PNG を**バイトのまま**置き場へ書く（書き出しの高速化・2026-10-23）＝base64 の文字にしない
+ * （画面で文字にする・運ぶときに包む・受け側で戻す、を省く）。置き場の名前と番号はヘッダで渡す（`import_asset_bytes` と同じ）。
+ */
+export async function stageExportFramePng(dirName: string, frameIndex: number, png: Uint8Array): Promise<void> {
+  await invoke('stage_export_frame_png', png, {
+    headers: { 'x-stage-dir': dirName, 'x-frame-index': String(frameIndex) },
+  });
+  await accountStagedFrame(png.byteLength);
+}
+
+/**
+ * **ほかの窓が置いたコマ**を見張りへ数える（ADR-0070）。別の窓には見張りが無い（JS の状態を共有しない）ので、
+ * 置いた枚数と大きさを本体へ知らせ、本体がここで数える＝空きが足りなくなる前に止める判定を、1窓のときと同じにする。
+ */
+export async function accountStagedFramesFromHelper(frames: number, bytes: number): Promise<void> {
+  if (frames <= 0) return;
+  const each = Math.ceil(bytes / frames);
+  for (let k = 0; k < frames; k += 1) await accountStagedFrame(each);
 }
 
 /**
@@ -312,11 +355,11 @@ function base64Bytes(dataBase64: string): number {
  * ⚠️ **空きを調べられなかったら止めない**＝調べられないこと自体を理由に**書き出しを断らない**
  *（Windows 以外・権限など。断ると「直しようのない断り」になる＝§2-5）。
  */
-async function accountStagedFrame(dataBase64: string): Promise<void> {
+async function accountStagedFrame(pngBytes: number): Promise<void> {
   const w = diskWatch;
   if (!w) return;
   w.bakedFrames += 1;
-  w.bakedBytes += base64Bytes(dataBase64);
+  w.bakedBytes += pngBytes;
   if (!shouldCheckDisk(w.bakedFrames)) return;
   let free: { stageFreeBytes: number; outFreeBytes: number | null; sameDrive: boolean };
   try {

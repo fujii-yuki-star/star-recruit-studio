@@ -36,7 +36,8 @@ const ENTRY = 'proc.rs';
  */
 const CALL_SITES: Record<string, number> = {
   'ffmpeg.rs': 4,
-  'voicevox_engine.rs': 1,
+  // ENGINE の起動＋検査の中でエンジンの代わりに動かし続ける子（ADR-0071）。
+  'voicevox_engine.rs': 2,
   // このパソコンの中で動画案を作る部品（ADR-0051 決定13＝VOICEVOX ENGINE と同じ型）。
   'local_llm.rs': 1,
   // 声を文字にする（ADR-0058）＝音の切り出し（FFmpeg）と `whisper-cli` の2つ＋検査の中で子の置き場を確かめる2つ（`cmd`）。
