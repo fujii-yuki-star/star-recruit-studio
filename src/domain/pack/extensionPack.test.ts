@@ -5,7 +5,9 @@ import {
   compareVersions,
   countPackTemplateUses,
   enabledFeatures,
+  isPackFeatureEnabled,
   isPackScopedId,
+  PACK_FEATURE,
   packIdOfScopedId,
   packIdPrefix,
   packInstallProblem,
@@ -114,6 +116,12 @@ describe('機能の鍵と外す前の数え上げ', () => {
     const a = manifest({ contents: { features: ['personalized-briefing', 'future-thing'] } });
     expect([...enabledFeatures([a], ['personalized-briefing'])]).toEqual(['personalized-briefing']);
     expect(enabledFeatures([], ['personalized-briefing']).size).toBe(0);
+  });
+  it('その機能を有効にしているパックが入っているときだけ、左の帯に出す（ADR-0061 決定1）', () => {
+    const on = manifest({ contents: { features: [PACK_FEATURE.personalizedBriefing] } });
+    expect(isPackFeatureEnabled([manifest(), on], PACK_FEATURE.personalizedBriefing)).toBe(true);
+    expect(isPackFeatureEnabled([manifest()], PACK_FEATURE.personalizedBriefing)).toBe(false);
+    expect(isPackFeatureEnabled([], PACK_FEATURE.personalizedBriefing)).toBe(false);
   });
   it('そのパックの見た目パターンを使う場面だけを数える', () => {
     expect(countPackTemplateUses('office_looks', ['pack_office_looks__a', 'pack_office_looks__b', 'pack_other__a', 'opening_v1'])).toBe(2);

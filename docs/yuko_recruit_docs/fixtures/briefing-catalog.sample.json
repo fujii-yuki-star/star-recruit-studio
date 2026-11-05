@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0",
+  "interests": [
+    { "interestId": "interest_001", "label": "仕事内容" },
+    { "interestId": "interest_002", "label": "研修" },
+    { "interestId": "interest_003", "label": "若手社員" }
+  ],
+  "sources": [
+    {
+      "projectId": "proj_20261101_001",
+      "enabled": true,
+      "scenes": [
+        { "sceneId": "scene_001", "interestIds": [], "priority": "high", "required": true, "excluded": false },
+        { "sceneId": "scene_002", "interestIds": ["interest_001"], "priority": "normal", "required": false, "excluded": false },
+        { "sceneId": "scene_003", "interestIds": ["interest_002", "interest_003"], "priority": "low", "required": false, "excluded": true }
+      ]
+    }
+  ],
+  "closing": { "text": "この動画は、当社が開発した動画づくり支援ソフト「すたりお」で作りました。", "useBrandLogo": true },
+  "exitCode": "1234"
+}

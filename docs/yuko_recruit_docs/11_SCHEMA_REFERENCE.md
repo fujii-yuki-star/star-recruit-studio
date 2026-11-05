@@ -434,6 +434,17 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
   **外したとき**＝パックの声を指す行・読み上げは V19 どおり既定の声で作り直される。⚠️ **作り済みのまま書き出そうとすると止める**（`VOICE_SPEAKER_GONE`／`TIMELINE_EXPORT_VOICE_GONE`＝鳴る声とクレジットが食い違うため）。動画全体の既定の声にはパックの声を選べない。
 - **作る道具**：`node scripts/make-starpack.mjs <フォルダ> <出力.starpack>`（`files` を全ファイルの SHA-256 で埋めてまとめる）。
 
+### 7.8 あなた向け会社説明の登録（`catalog.json`・β・ADR-0061）
+
+学生が選んだ興味から説明動画を組むための**登録**。置き場所は `appData/extensions/personalized-briefing/catalog.json`（Rust の `briefing_catalog_load`／`briefing_catalog_save`＝読めない・無いときは `null`、書くときは丸ごと置き換え）。正典は `schemas/briefing-catalog.schema.json`（独立した `schemaVersion`＝初期 `"1.0"`）。
+⚠️ **`project.json` には入れない**＝β を外しても α の動画はそのまま開ける（ADR-0061 判断軸）。動画と場面は **id で指すだけ**（原本は書き換えない）。
+
+- `interests[]`＝`{ interestId: interest_NNN, label: 1〜30字 }`（並べた順に学生へ見せる・30 個まで）。最初は例（仕事内容・研修・若手社員・技術・福利厚生・社風）を入れておく（`DEFAULT_BRIEFING_INTERESTS`・利用者判断 2026-11-05）。項目を消すと、場面に付いていたその項目も外す。
+- `sources[]`＝`{ projectId, enabled, scenes[] }`（場面形式の動画だけ）。`scenes[]`＝`{ sceneId, interestIds[], priority: high|normal|low, required, excluded }`。**載っていない場面は使わない**。声の差し替えの可否は場面ごとに持たない（単独のナレーションかで自動で決まる＝ADR-0061 決定2）。
+- `closing`＝`{ text: 1〜120字, useBrandLogo }`（最後に必ず入れる「すたりおで作った」場面）。
+- `exitCode`＝4 桁の数字か `null`（まだ決めていない＝学生の画面は始められない）。
+- **指す先が無いとき**（動画・場面を消した）は、登録の画面で知らせる（`briefingCatalogProblems`＝黙って飛ばさない）。
+
 ## 8. 検証ルール（コード化可能な形）
 
 AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema で表現できるもの**＝型・必須・enum・範囲（`schemas/` に内包）。**Schema で表せない相互参照・横断条件**＝下記をドメインで実装。

@@ -1495,6 +1495,40 @@ fn save_brand_kit(app: tauri::AppHandle, kit_json: String) -> Result<(), String>
     write_json_atomic(&path, &kit_json)
 }
 
+/// あなた向け会社説明の登録（β・ADR-0061 決定2・`11 §7.8`）＝`appData/extensions/personalized-briefing/catalog.json`。
+///
+/// ⚠️ **`project.json` には入れない**＝β を外しても α の動画はそのまま開ける。動画と場面は id で指すだけ。
+fn briefing_catalog_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base
+        .join("extensions")
+        .join("personalized-briefing")
+        .join("catalog.json"))
+}
+
+/// 登録を読む。**無ければ `None`**（はじめて＝画面が例の項目つきの登録で始める）。形の検査は画面側（schema・§2-2）。
+#[tauri::command]
+fn briefing_catalog_load(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = briefing_catalog_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// 登録を書く（丸ごと置き換え・不可分）。JSON として読めない本文は**書かない**（ブランドキットと同じ流儀）。
+#[tauri::command]
+fn briefing_catalog_save(app: tauri::AppHandle, catalog_json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&catalog_json).map_err(|e| e.to_string())?;
+    let path = briefing_catalog_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    write_json_atomic(&path, &catalog_json)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1593,6 +1627,8 @@ pub fn run() {
             update_library_asset,
             load_brand_kit,
             save_brand_kit,
+            briefing_catalog_load,
+            briefing_catalog_save,
             ffmpeg::export_video,
             ffmpeg::begin_export,
             ffmpeg::cancel_export,

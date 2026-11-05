@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { ScreenId } from "../data/mockData";
 import { HOME_SCREEN_LABEL } from "../uiLabels";
 import { isProjectScreen } from "../navigation";
@@ -10,6 +11,7 @@ import {
   HelpIcon,
   InfoIcon,
   ChevronRightIcon,
+  SparkleIcon,
 } from "./icons";
 import { yukoImage } from "../data/yukoImages";
 import { SCREEN_TITLES } from "../screenTitles";
@@ -32,6 +34,11 @@ interface SidebarProps {
    * 親（`App`）の仕事。ここは「畳んでほしい」と伝えるだけ。
    */
   onCollapse: () => void;
+  /**
+   * あなた向け会社説明（β・ADR-0061 決定1）を出すか＝拡張パックの鍵（`personalized-briefing`）があるときだけ。
+   * ⚠️ 通常のすたりおには出さない（会社・採用に固有の機能＝ADR-0043）。
+   */
+  briefingEnabled?: boolean;
 }
 
 // 先頭「動画」＝一覧（現ホームを統合）＋素材/見た目/設定。
@@ -44,7 +51,7 @@ const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
   { id: "settings", label: "設定", icon: SettingsIcon },
 ];
 
-export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: SidebarProps) {
+export function Sidebar({ current, onNavigate, currentProjects, onCollapse, briefingEnabled = false }: SidebarProps) {
   // 「プロジェクト」（一覧）は一覧画面でのみ active。工程画面は「今の動画」を active にする。
   // 「見た目パターン」は一覧(looks)＋編集(looks-edit)を束ねて active にする（工程画面群と同じ考え方・#399 レビュー）。
   const isActive = (id: ScreenId): boolean =>
@@ -115,8 +122,23 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
         {mainMenu.map((item) => {
           const Icon = item.icon;
           return (
+            <Fragment key={item.id}>
+            {/* あなた向け会社説明（β）＝拡張パックの鍵があるときだけ・「設定」の前に区切って出す（#1336 §3-1）。 */}
+            {item.id === "settings" && briefingEnabled && (
+              <>
+                <hr className="sidebar-sep" aria-hidden="true" />
+                <button
+                  className={`nav-item${isActive("briefing") ? " active" : ""}`}
+                  onClick={() => onNavigate("briefing")}
+                  aria-current={isActive("briefing") ? "page" : undefined}
+                >
+                  <SparkleIcon size={20} className="nav-icon" />
+                  {SCREEN_TITLES.briefing}
+                </button>
+                <hr className="sidebar-sep" aria-hidden="true" />
+              </>
+            )}
             <button
-              key={item.id}
               className={`nav-item${isActive(item.id) ? " active" : ""}`}
               onClick={() => onNavigate(item.id)}
               aria-current={isActive(item.id) ? "page" : undefined}
@@ -124,6 +146,7 @@ export function Sidebar({ current, onNavigate, currentProjects, onCollapse }: Si
               <Icon size={20} className="nav-icon" />
               {item.label}
             </button>
+            </Fragment>
           );
         })}
         {/* 使い方（#1229・ADR-0046 ①）。

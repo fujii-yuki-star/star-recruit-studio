@@ -20,7 +20,9 @@ export type ScreenId =
   | "materials"
   | "settings"
   | "help"
-  | "about";
+  | "about"
+  // あなた向け会社説明の登録（β・ADR-0061）＝拡張パックの鍵があるときだけ左の帯に出る。
+  | "briefing";
 
 // 読み上げの声（ナレーション）の作成状態
 export type VoiceStatus = "none" | "pending" | "generated" | "failed";
