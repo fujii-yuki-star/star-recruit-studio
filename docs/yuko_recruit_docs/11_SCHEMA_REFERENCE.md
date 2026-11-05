@@ -181,6 +181,7 @@
 | `BRIEFING_LONG_MAX_SEC` | `240` | 同上の「しっかり」の上限（秒） |
 | `BRIEFING_AI_CANDIDATE_MAX` | `40` | 同上で同梱の AI に見せる場面の数の上限（必ず入れる場面＋ルールの順で上から）＝指示文を伸ばしすぎない |
 | `BRIEFING_AI_SPEECH_MAX_LENGTH` | `60` | 同上で場面ごとに見せるセリフの字数の上限 |
+| `BRIEFING_CLOSING_DURATION_SEC` | `6` | 同上の**最後の場面**（「すたりおで作りました」・声なし）の長さ（秒）。組む長さには数えない |
 | `BRIEFING_SESSION_ID_FLOOR` | `900` | 同上の**一時の動画の番号の帯**＝その日のこの数より上（901〜999）で空いている一番小さい番号を採る（`11 §7.9`）。通常の動画を作る所は通常の一覧の番号しか見ないので、帯を分けて重ならないようにする |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
@@ -466,6 +467,10 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - **ファイル**（`briefing_session_copy_files`）＝原本から**名前を変えて**コピーする（場面の取り込みで番号を付け替えるため・`importScenes` の `files`）。⚠️ コピー先は一時の動画だけ・原本には書かない・途中で失敗したらコピーした分を消す・同じ新しい名前へ2回は書かない。元に無いファイルは `missing` で返す（黙って飛ばさない）。
 - **消す**＝作ってから **24 時間**（`session.json` の時刻・読めなければフォルダの時刻・どちらも無ければ消さない）。アプリの起動時（`cleanup_stale_export_dirs` と並べる）と、この機能を開いた時・1 時間ごと（`briefing_sessions_cleanup`）。「この回のデータを消す」は `briefing_session_delete`。⚠️ **消すのは `temporary-sessions/` の直下の、番号の形のフォルダだけ**（原本・素材の棚・見た目パターン・登録には触らない）。書き出した物も同じフォルダに置く＝一緒に消える。
 - `asset://` の許可＝`$APPDATA/temporary-sessions/**`（`projects/**` と同じ深さ・起動時に作って許可する）。
+- **組み立て**（`buildBriefingProject`・純粋関数）＝組んだ並びの場面を原本から取り込み（`importScenes`）、最後の場面を足して `project.json` を作る。
+  - **向きは1つ**＝最初の場面の動画の向きにそろえ、違う向きの動画の場面は入れずに知らせる（`skippedOrientation`）。動画の設定・声の既定・会社の情報・BGM は最初の場面の動画から写す。パートは1つ（`part_001`）。
+  - **声**＝単独のナレーション（掛け合いでない・話す文がある）の場面だけ、選んだ声（`narration.voiceId`）にして作り直す（`status: pending`・`voicePath: null`・その元の声のファイルはコピーしない）。掛け合いの場面は元の声とファイルのまま（ADR-0061 判断2）。
+  - **最後の場面**（`buildBriefingClosingScene`）＝向きに合う**同梱の自由配置の器**（`category: free`）に、地・ロゴ（会社の見た目のロゴ・無ければ置かない）・差し色の線・文（`catalog.closing.text`）・下の帯を、ロゴ → 線 → 文の順で画面の縦の真ん中に置く。差し色は会社の色の1つ目（無ければ既定）。声は付けない・長さは `BRIEFING_CLOSING_DURATION_SEC`。⚠️ 見た目パターンは増やさない（一覧・AI の選択肢に出さない）。器が無ければ作らずに知らせる（`closingMissing`）。
 
 ## 8. 検証ルール（コード化可能な形）
 
