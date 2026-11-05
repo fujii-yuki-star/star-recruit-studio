@@ -173,6 +173,14 @@
 | `ASSET_AI_TAGS_MAX` | `5` | 同上で付けるタグの数の上限 |
 | `ASSET_AI_TAG_MAX_LENGTH` | `12` | 同上のタグ1つの字数の上限 |
 | `ASSET_MATCH_MIN_SCORE` | `0.2` | **写真・動画を場面へソフトが当てる**とき（`12 §8.8`）、これ未満の言葉の重なり（0〜1）は「自信が低い」＝印（`ASSET_AUTO_ASSIGNED`）を付ける |
+| `BRIEFING_SHORT_MIN_SEC` | `40` | **あなた向け会社説明**（β・ADR-0061 決定4・`12 §11`）で学生が「短め」を選んだときの長さの下限（秒）。最後の場面は数えない |
+| `BRIEFING_SHORT_MAX_SEC` | `80` | 同上の「短め」の上限（秒） |
+| `BRIEFING_NORMAL_MIN_SEC` | `90` | 同上の「ふつう」の下限（秒） |
+| `BRIEFING_NORMAL_MAX_SEC` | `150` | 同上の「ふつう」の上限（秒） |
+| `BRIEFING_LONG_MIN_SEC` | `150` | 同上の「しっかり」の下限（秒） |
+| `BRIEFING_LONG_MAX_SEC` | `240` | 同上の「しっかり」の上限（秒） |
+| `BRIEFING_AI_CANDIDATE_MAX` | `40` | 同上で同梱の AI に見せる場面の数の上限（必ず入れる場面＋ルールの順で上から）＝指示文を伸ばしすぎない |
+| `BRIEFING_AI_SPEECH_MAX_LENGTH` | `60` | 同上で場面ごとに見せるセリフの字数の上限 |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
 | `VIDEO_HARD_MAX_SEC` | `1800` | ハード上限（**30分**・ADR-0045／2026-09-18 利用者判断で 600→1800）。⚠️ **3か所を同じ値にする**＝この表・`src/domain/constants.ts`・`schemas/project.schema.json` の `maxDurationSec.maximum`（門番＝`src/test/canonConstantsGuard.test.ts`） |
@@ -444,6 +452,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - `closing`＝`{ text: 1〜120字, useBrandLogo }`（最後に必ず入れる「すたりおで作った」場面）。
 - `exitCode`＝4 桁の数字か `null`（まだ決めていない＝学生の画面は始められない）。
 - **指す先が無いとき**（動画・場面を消した）は、登録の画面で知らせる（`briefingCatalogProblems`＝黙って飛ばさない）。
+- 組み方（絞る・同梱の AI・確かめる・ルールだけ）は `12 §11`。
 
 ## 8. 検証ルール（コード化可能な形）
 
