@@ -264,20 +264,19 @@ pub fn briefing_session_copy_files(
 mod tests {
     use super::*;
 
+    /// 検査ごとに別の入れ物（並べて走るので、時刻だけ・XOR で混ぜた値は重なりうる＝CI で実際に重なった）。
     fn tmp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "stario_temp_sessions_{}_{}",
-            std::process::id(),
-            now_ms() ^ (rand_suffix() as u64)
-        ));
-        fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    fn rand_suffix() -> u32 {
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
-        N.fetch_add(1, Ordering::SeqCst)
+        let d = std::env::temp_dir().join(format!(
+            "stario_temp_sessions_{}_{}_{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst),
+            now_ms()
+        ));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
     }
 
     const ID: &str = "proj_20261105_9001";
