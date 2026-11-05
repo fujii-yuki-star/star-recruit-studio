@@ -245,7 +245,7 @@ export function BriefingAdminScreen({ enabled }: { enabled: boolean }) {
                               ))}
                             </div>
                             <div className="row gap-lg text-sm" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                              <label className="row gap-xs" style={{ alignItems: "center" }}>
+                              <label className="row gap-xs" style={{ alignItems: "center", whiteSpace: "nowrap" }}>
                                 優先度
                                 <select
                                   className="input"
