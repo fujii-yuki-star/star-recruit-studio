@@ -473,7 +473,8 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - **組み立て**（`buildBriefingProject`・純粋関数）＝組んだ並びの場面を原本から取り込み（`importScenes`）、最後の場面を足して `project.json` を作る。
   - **向きは1つ**＝最初の場面の動画の向きにそろえ、違う向きの動画の場面は入れずに知らせる（`skippedOrientation`）。動画の設定・声の既定・会社の情報・BGM は最初の場面の動画から写す。パートは1つ（`part_001`）。
   - **声**＝単独のナレーション（掛け合いでない・話す文がある）の場面だけ、選んだ声（`narration.speaker`＝ADR-0073）にして作り直す（`status: pending`・`voicePath: null`・その元の声のファイルはコピーしない）。掛け合いの場面は元の声とファイルのまま（ADR-0061 判断2）。
-  - **最後の場面**（`buildBriefingClosingScene`）＝向きに合う**同梱の自由配置の器**（`category: free`）に、地・ロゴ（会社の見た目のロゴ・無ければ置かない）・差し色の線・文（`catalog.closing.text`）・下の帯を、ロゴ → 線 → 文の順で画面の縦の真ん中に置く。差し色は会社の色の1つ目（無ければ既定）。声は付けない・長さは `BRIEFING_CLOSING_DURATION_SEC`。⚠️ 見た目パターンは増やさない（一覧・AI の選択肢に出さない）。器が無ければ作らずに知らせる（`closingMissing`）。
+  - **作るのは組んだ直後**（ADR-0061 追補 2026-11-06）＝学生の簡易場面編集で、一時の動画を本来の場面編集と同じ部品で並べ替え・外す・声を変える。
+  - **最後の場面**（`buildBriefingClosingScene`）＝向きに合う**同梱の自由配置の器**（`category: free`）に、地・ロゴ（会社の見た目のロゴ・無ければ置かない）・差し色の線・文（`catalog.closing.text`）・下の帯と、文の下に控えめな**「作り方」の一言**（`briefingHowText`＝選んだ興味・AI で組んだときだけ「AI が」・場面の数＝事実だけ。学生が外したら作るときに数を合わせる＝`withClosingHowText`）を、ロゴ → 線 → 文 → 一言の順で画面の縦の真ん中に置く。差し色は会社の色の1つ目（無ければ既定）。声は付けない・長さは `BRIEFING_CLOSING_DURATION_SEC`。⚠️ 見た目パターンは増やさない（一覧・AI の選択肢に出さない）。器が無ければ作らずに知らせる（`closingMissing`）。
 
 ## 8. 検証ルール（コード化可能な形）
 

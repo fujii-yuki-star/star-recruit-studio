@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { FREE_CATEGORY } from '../enums';
 import { sampleTemplates } from '../../infrastructure/sampleData';
-import { BRIEFING_CLOSING_COLORS, buildBriefingClosingScene, closingTemplateFor, type BriefingClosingInput } from './closing';
+import { BRIEFING_CLOSING_COLORS, BRIEFING_HOW_LABELS_MAX, briefingHowText, buildBriefingClosingScene, closingTemplateFor, withClosingHowText, briefingMoveTarget, type BriefingClosingInput } from './closing';
 import { BRIEFING_CLOSING_DURATION_SEC } from '../constants';
 import type { FreeElement } from '../project/types';
 
@@ -63,5 +63,44 @@ describe('最後の場面', () => {
     expect(closingTemplateFor([user, free], '16:9')?.templateId).toBe('free_canvas_v1');
     expect(closingTemplateFor([user], '16:9')).toBeNull();
     expect(buildBriefingClosingScene(input({ templates: [free], orientation: '9:16' }))).toBeNull();
+  });
+});
+
+describe('作り方の一言（ADR-0061 追補 2026-11-06）', () => {
+  it('事実だけで言う＝AI で組んだときだけ「AI が」・場面の数・興味は上限まで（越えたら「など」）・興味が無ければ「あなたに合わせて」', () => {
+    expect(briefingHowText({ interestLabels: ['研修', '技術'], sceneCount: 5, byAi: true })).toBe('あなたが選んだ「研修・技術」に合わせて、AI が5つの場面を選んで並べ、声も自動で作りました。');
+    expect(briefingHowText({ interestLabels: ['研修'], sceneCount: 2, byAi: false })).toBe('あなたが選んだ「研修」に合わせて、2つの場面を選んで並べ、声も自動で作りました。');
+    const many = ['a', 'b', 'c', 'd', 'e'];
+    expect(briefingHowText({ interestLabels: many, sceneCount: 1, byAi: false })).toContain(`「${many.slice(0, BRIEFING_HOW_LABELS_MAX).join('・')}など」`);
+    expect(briefingHowText({ interestLabels: [' '], sceneCount: 1, byAi: false })).toBe('あなたに合わせて、1つの場面を選んで並べ、声も自動で作りました。');
+  });
+
+  it('一言は締めの文の下に控えめに置き、まとまり全体を縦の真ん中に・差し替えられる', () => {
+    const s = buildBriefingClosingScene(input({ howText: '作り方です' }))!;
+    const text = byName(s.freeLayout, '締めの文');
+    const how = byName(s.freeLayout, '作り方');
+    expect(how).toMatchObject({ kind: 'text', text: '作り方です', textAlign: 'center' });
+    expect(how.y).toBeGreaterThan(text.y + text.h);
+    expect(how.fontSize!).toBeLessThan(text.fontSize!);
+    const logo = byName(s.freeLayout, 'ロゴ');
+    expect(Math.abs(logo.y - (1080 - (how.y + how.h)))).toBeLessThanOrEqual(1);
+    const changed = withClosingHowText(s, '新しい一言');
+    expect(byName(changed.freeLayout, '作り方').text).toBe('新しい一言');
+    expect(byName(changed.freeLayout, '締めの文').text).toBe('締めの文');
+    // 一言なしで作った場面は変えない
+    const plain = buildBriefingClosingScene(input())!;
+    expect(withClosingHowText(plain, 'x')).toBe(plain);
+    expect(plain.freeLayout?.some((e) => e.name === '作り方')).toBe(false);
+  });
+});
+
+describe('学生がパートを動かす先', () => {
+  it('締め（最後）より後ろへは置かない・先頭より前へも行かない', () => {
+    // 3 つ（2 つ＋締め）：動かせる先は 0〜1
+    expect(briefingMoveTarget(0, 3)).toBe(0);
+    expect(briefingMoveTarget(1, 3)).toBe(1);
+    expect(briefingMoveTarget(2, 3)).toBe(1);
+    expect(briefingMoveTarget(9, 3)).toBe(1);
+    expect(briefingMoveTarget(-1, 3)).toBe(0);
   });
 });

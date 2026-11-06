@@ -72,6 +72,8 @@ export async function prepareBriefingVideo(input: {
   templates: readonly Template[];
   /** 学生が選んだ声（VOICEVOX の話者番号）・null＝元の声のまま。 */
   speaker: number | null;
+  /** 締めの場面の「作り方」の一言（ADR-0061 追補）。 */
+  closingHowText?: string | null;
   now: Date;
 }): Promise<string> {
   const byId = new Map(input.docs.map((d) => [d.projectId, d]));
@@ -97,6 +99,7 @@ export async function prepareBriefingVideo(input: {
       picks,
       speaker: input.speaker,
       closingText: input.catalog.closing.text,
+      closingHowText: input.closingHowText ?? null,
       makeLogoAsset: lib
         ? (ids) => {
             const made = assetFromLibrary(lib, ids);

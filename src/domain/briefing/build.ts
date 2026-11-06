@@ -30,6 +30,8 @@ export interface BriefingBuildInput {
   speaker: number | null;
   /** 最後の場面の文。 */
   closingText: string;
+  /** 最後の場面の「作り方」の一言（`briefingHowText`）。 */
+  closingHowText?: string | null;
   /**
    * 最後の場面のロゴの素材を作る（会社の見た目のロゴを使うとき）。`existingAssetIds` と重ならない番号で作って返す。
    * 無い・使わないときは渡さない（または null を返す）。
@@ -100,6 +102,7 @@ export function buildBriefingProject(input: BriefingBuildInput): BriefingBuildRe
     order: scenes.length + 1,
     orientation,
     text: input.closingText,
+    howText: input.closingHowText ?? null,
     logoAssetId: logoAsset?.assetId ?? null,
     accentColor: input.accentColor,
     templates: input.templates,

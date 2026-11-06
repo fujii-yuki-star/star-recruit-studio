@@ -99,8 +99,9 @@ describe("見た目のクラスは実在する（#1246）", () => {
     // ⚠️ **+1**（ADR-0048 追補 2026-10-21）＝並びの道具の見え方のまとまり（`timeline-view-tools`）。
     // ⚠️ **+2**（使い勝手の点検 2026-10-22）＝押すと開く「？」（`help-tip`・`help-tip-body`）。
     // +1（ADR-0061 段階2＝左の帯の区切り `sidebar-sep`）。
+    // +5（ADR-0061 追補＝学生の簡易場面編集 `briefing-editor-*`）。
     // +12（ADR-0061 段階5＝学生の画面 `briefing-student*`）。
-    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(248);
+    expect(new Set(classNamesIn(read(screenFiles()))).size).toBe(253);
   });
 });
 
