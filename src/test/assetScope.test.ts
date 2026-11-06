@@ -57,9 +57,31 @@ describe("asset:// で配れる場所は、置き場所の深さと合ってい�
     // `false` で `*` を足すので、設定が `/*` の場所を `true` で足すと**設定より広く許す**ことになる。
     for (const entry of scope) {
       const dir = entry.replace(/^\$(APPDATA|RESOURCE)\//, "").replace(/\/\*+$/, "").replace(/-/g, "_");   // projects / user_assets / tutorials / temporary_sessions
+      // ⚠️ **一時の説明動画の置き場は起動時に作らない**（ADR-0061 決定1＝拡張パックの無い人には一切動かさない）＝下の別の検査で見る。
+      if (dir === "temporary_sessions") continue;
       const recursive = entry.endsWith("/**");
       expect(body).toMatch(new RegExp(String.raw`${dir}_dir\(app\),\s*${recursive}`));
     }
+  });
+
+  // ADR-0061 決定1：一時の説明動画の置き場は**在るときだけ**起動時に許可し、**無ければ作らない**。
+  // 初めて一時の動画を作ったとき（`briefing_session_create`）に許可を足す＝足し忘れると写真が 403。
+  it("一時の説明動画の置き場は起動時に作らず、在るときと作ったときに許可する（ADR-0061）", () => {
+    // 関数を取り出してから、コメントの行を落とす（説明に同じ語が出るので、そのままだと要の行を消しても通る）。
+    const fnOf = (src: string, head: string): string => {
+      const m = src.match(new RegExp(String.raw`${head}[\s\S]*?\n\}`));
+      expect(m, head).not.toBeNull();
+      return m![0].split(/\r?\n/).filter((l) => !l.trim().startsWith("//")).join(" ");
+    };
+    const rs = readFileSync("src-tauri/src/lib.rs", "utf-8");
+    const body = fnOf(rs, "fn ensure_asset_scope_dirs");
+    expect(body).not.toMatch(/temporary_sessions_dir\(app\),\s*true/);
+    expect(body).toMatch(/temporary_sessions_dir\(app\)[\s\S]*?is_dir\(\)[\s\S]*?temp_sessions::allow_asset_scope\(/);
+    const ts = readFileSync("src-tauri/src/temp_sessions.rs", "utf-8");
+    expect(fnOf(ts, "pub fn briefing_session_create")).toMatch(/create_in\([\s\S]*?\)\?;[\s\S]*?allow_asset_scope\(/);
+    expect(fnOf(ts, "pub fn allow_asset_scope")).toMatch(/allow_directory\(dir, true\)/);
+    // 起動時の片づけも、置き場が無ければスレッドを起こさない
+    expect(fnOf(ts, "pub fn cleanup_on_startup")).toMatch(/if !base\.join\(SESSIONS_DIR_NAME\)\.is_dir\(\) \{\s*return;\s*\}[\s\S]*spawn_blocking/);
   });
 
   it("`asset://` を使うのはこの3か所だけ（増えたらここも見直す）", () => {
