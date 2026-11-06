@@ -14,8 +14,24 @@ import { isUserTemplate } from '../template/userTemplate';
 export const BRIEFING_CLOSING_COLORS = {
   ground: '#f5f7fa',
   text: '#1d2430',
+  /** 「作り方」の一言（締めの文より控えめ）。 */
+  sub: '#4a5563',
   accent: '#2f5d8a',
 } as const;
+
+/** 「作り方」の一言に並べる興味の数の上限（越えたら「など」）＝長くしすぎない。 */
+export const BRIEFING_HOW_LABELS_MAX = 4;
+
+/**
+ * 締めの場面の「作り方」の一言（ADR-0061 追補 2026-11-06）＝この動画がいまどう作られたかを、**事実だけ**で言う。
+ * ⚠️ AI がルールに落ちた（`byAi` が偽）なら「AI が」と書かない・場面の数は実際の数（締めの場面は数えない）。
+ */
+export function briefingHowText(input: { interestLabels: readonly string[]; sceneCount: number; byAi: boolean }): string {
+  const labels = input.interestLabels.filter((l) => l.trim().length > 0);
+  const shown = labels.slice(0, BRIEFING_HOW_LABELS_MAX).join('・') + (labels.length > BRIEFING_HOW_LABELS_MAX ? 'など' : '');
+  const whom = shown ? `あなたが選んだ「${shown}」に合わせて、` : 'あなたに合わせて、';
+  return `${whom}${input.byAi ? 'AI が' : ''}${input.sceneCount}つの場面を選んで並べ、声も自動で作りました。`;
+}
 
 /**
  * 向きごとの寸法。**ロゴ → 差し色の線 → 文**を1つのまとまりにして、画面の縦の真ん中に置く（ロゴが無ければ線と文だけ）。
@@ -31,6 +47,11 @@ const LINE_HEIGHT = 1.5;
 /** 差し色の線と、下の端の帯の太さ。 */
 const BAR = { w: 120, h: 8 };
 const FOOT_H = 14;
+/** 「作り方」の一言の文字の大きさ（締めの文に対する割合）と行数（折り返しの余白）。 */
+const HOW_FONT_RATIO = 0.62;
+const HOW_LINES = 2;
+/** 締めの場面の「作り方」の一言の部品の名前（`buildBriefingClosingScene` が付け、`withClosingHowText` が探す）。 */
+const HOW_ELEMENT_NAME = '作り方';
 
 export interface BriefingClosingInput {
   sceneId: string;
@@ -39,6 +60,8 @@ export interface BriefingClosingInput {
   orientation: Orientation;
   /** 登録の文（`catalog.closing.text`）。 */
   text: string;
+  /** 「作り方」の一言（`briefingHowText`）。無ければ出さない。 */
+  howText?: string | null;
   /** 置くロゴの素材の番号（一時の動画の中の番号）。無ければ置かない。 */
   logoAssetId: string | null;
   /** 差し色（会社の色の1つ目）。無ければ既定。 */
@@ -60,7 +83,11 @@ export function buildBriefingClosingScene(input: BriefingClosingInput): Scene | 
   const accent = input.accentColor || BRIEFING_CLOSING_COLORS.accent;
   const textH = Math.ceil(L.fontSize * LINE_HEIGHT * L.textLines);
   const logoBlock = input.logoAssetId ? L.logo.h + L.gap : 0;
-  const top = Math.round((L.h - (logoBlock + BAR.h + L.gap + textH)) / 2);
+  const how = input.howText?.trim() ?? '';
+  const howFont = Math.round(L.fontSize * HOW_FONT_RATIO);
+  const howH = Math.ceil(howFont * LINE_HEIGHT * HOW_LINES);
+  const howBlock = how ? Math.round(L.gap / 2) + howH : 0;
+  const top = Math.round((L.h - (logoBlock + BAR.h + L.gap + textH + howBlock)) / 2);
   const barY = top + logoBlock;
   const elements: FreeElement[] = [
     { id: 'free_001', kind: FREE_ELEMENT_KIND.shape, shapeType: FREE_SHAPE_TYPE.rect, x: 0, y: 0, w: L.w, h: L.h, zIndex: 0, fillColor: BRIEFING_CLOSING_COLORS.ground, name: '地' },
@@ -95,6 +122,24 @@ export function buildBriefingClosingScene(input: BriefingClosingInput): Scene | 
     },
     { id: 'free_005', kind: FREE_ELEMENT_KIND.shape, shapeType: FREE_SHAPE_TYPE.rect, x: 0, y: L.h - FOOT_H, w: L.w, h: FOOT_H, zIndex: 3, fillColor: accent, name: '下の帯' },
   ];
+  if (how) {
+    elements.push({
+      id: 'free_006',
+      kind: FREE_ELEMENT_KIND.text,
+      x: Math.round((L.w - L.textW) / 2),
+      y: barY + BAR.h + L.gap + textH + Math.round(L.gap / 2),
+      w: L.textW,
+      h: howH,
+      zIndex: 2,
+      text: how,
+      fontSize: howFont,
+      color: BRIEFING_CLOSING_COLORS.sub,
+      fontWeight: FONT_WEIGHT.normal,
+      textAlign: TEXT_ALIGN.center,
+      lineHeight: LINE_HEIGHT,
+      name: HOW_ELEMENT_NAME,
+    });
+  }
   if (input.logoAssetId) {
     elements.push({ id: 'free_004', kind: FREE_ELEMENT_KIND.slot, assetId: input.logoAssetId, fit: FIT.contain, x: Math.round((L.w - L.logo.w) / 2), y: top, w: L.logo.w, h: L.logo.h, zIndex: 1, name: 'ロゴ' });
   }
@@ -112,4 +157,23 @@ export function buildBriefingClosingScene(input: BriefingClosingInput): Scene | 
     warnings: [],
     freeLayout: elements,
   };
+}
+
+
+/**
+ * 締めの場面の「作り方」の一言を差し替える（学生が場面を外した後に、場面の数を合わせる・ADR-0061 追補）。
+ * 一言の部品が無ければそのまま返す（締めの場面でない・一言なしで作った）。
+ */
+export function withClosingHowText(scene: Scene, howText: string): Scene {
+  const els = scene.freeLayout ?? [];
+  if (!els.some((e) => e.name === HOW_ELEMENT_NAME)) return scene;
+  return { ...scene, freeLayout: els.map((e) => (e.name === HOW_ELEMENT_NAME ? { ...e, text: howText } : e)) };
+}
+
+/**
+ * 学生の簡易場面編集で、パートを動かす先（ADR-0061 追補）＝**締めの場面（いつも最後）より後ろへは置かない**。
+ * `count` は締めを含む場面の数。掴んで運ぶ・矢印のどちらもここを通す。
+ */
+export function briefingMoveTarget(toIndex: number, count: number): number {
+  return Math.max(0, Math.min(toIndex, count - 2));
 }

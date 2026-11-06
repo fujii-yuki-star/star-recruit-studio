@@ -2086,7 +2086,7 @@ button.flow-step:hover:not(:disabled) {
 .briefing-student-body {
   flex: 1;
   width: 100%;
-  max-width: 960px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 32px;
 }
@@ -2150,4 +2150,39 @@ button.flow-step:hover:not(:disabled) {
   right: 32px;
   z-index: 10;
   width: 320px;
+}
+
+/* 学生の簡易場面編集（ADR-0061 追補 2026-11-06）＝本来の場面編集と同じカード（.scene-card）を、横に並べる。 */
+.briefing-editor-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+.briefing-editor-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 320px;
+}
+.briefing-editor-side {
+  min-width: 0;
+}
+.briefing-editor-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+.briefing-editor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+}
+@media (max-width: 900px) {
+  .briefing-editor-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

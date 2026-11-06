@@ -10,10 +10,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { BRIEFING_LENGTH, BRIEFING_LENGTHS, briefingVoiceChoices, type BriefingCandidate, type BriefingLength } from "../../domain/briefing/compose";
+import { BRIEFING_LENGTH, BRIEFING_LENGTHS, briefingVoiceChoices, type BriefingLength } from "../../domain/briefing/compose";
+import { briefingHowText, withClosingHowText } from "../../domain/briefing/closing";
 import { isCompanyOkVoiceCharacter, VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import type { BriefingCatalog } from "../../domain/briefing/catalog";
-import { BRIEFING_CLOSING_DURATION_SEC, EXPORT_SIZE } from "../../domain/constants";
+import { EXPORT_SIZE } from "../../domain/constants";
 import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
 import { sceneUngeneratedVoices } from "../../domain/startup/startupReadiness";
 import type { Project } from "../../domain/project/types";
@@ -31,6 +32,7 @@ import {
   withLastProjectKept,
 } from "../briefing/briefingRun";
 import { ExportScreen } from "./ExportScreen";
+import { BriefingStudentEditor } from "./BriefingStudentEditor";
 import {
   BRIEFING_EXIT_CODE_WRONG_MESSAGE,
   BRIEFING_EXPORT_FAILED_MESSAGE,
@@ -47,11 +49,6 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 /** 仕上げた動画の名前（一時の動画のフォルダの直下に置く＝消すとき一緒に消える）。 */
 const OUTPUT_FILE_NAME = "briefing.mp4";
 
-function minutesLabel(sec: number): string {
-  const min = Math.max(1, Math.round(sec / 60));
-  return `約 ${min} 分`;
-}
-
 export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog }) {
   const templates = useProjectStore((s) => s.templates);
   const exportRun = useProjectStore((s) => s.exportRun);
@@ -62,8 +59,9 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
   const [speaker, setSpeaker] = useState<number | null>(null);
   const voiceChoices = useMemo(() => briefingVoiceChoices(VOICE_CATALOG, isCompanyOkVoiceCharacter), []);
   const [docs, setDocs] = useState<Project[] | null>(null);
-  const [picks, setPicks] = useState<BriefingCandidate[]>([]);
-  const [off, setOff] = useState<Set<string>>(new Set());
+  // 締めの場面の「作り方」の一言の材料（組んだ事実＝選んだ興味の名前・AI で組んだか）。
+  const [how, setHow] = useState<{ labels: string[]; byAi: boolean } | null>(null);
+  const [composingText, setComposingText] = useState("");
   const [errorText, setErrorText] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -86,16 +84,26 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
     if (id) void deleteBriefingSession(id).catch(() => {});
   }, []);
 
-  const kept = picks.filter((c) => !off.has(c.key));
-  const totalSec = kept.reduce((t, c) => t + c.durationSec, 0) + BRIEFING_CLOSING_DURATION_SEC;
-  const interestLabel = useMemo(() => new Map(catalog.interests.map((i) => [i.interestId, i.label])), [catalog]);
-
   const toggleInterest = (id: string): void =>
     setChosen((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
+  /** 作りかけの一時の動画を消す（「別の案を作る」・「選び直す」）。 */
+  async function discardSession(): Promise<void> {
+    const id = sessionRef.current;
+    sessionRef.current = null;
+    setSessionId(null);
+    useProjectStore.getState().newProject();
+    if (id) await deleteBriefingSession(id).catch((e) => console.warn("[briefing] 消せませんでした（24 時間で消えます）:", e));
+  }
+
+  /**
+   * 組む → すぐ一時の動画を作って開き、声を作っておく（ADR-0061 追補＝本来の場面編集と同じ部品で確かめるため）。
+   */
   async function compose(): Promise<void> {
     setStep("composing");
+    setComposingText("あなたに合わせて組み立てています…");
     try {
+      await discardSession();
       const sources = docs ?? (await loadBriefingSources(catalog));
       setDocs(sources);
       // 並びは登録の興味の順（学生が押した順に左右されない）。
@@ -106,36 +114,54 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
         setStep("error");
         return;
       }
-      setPicks(result.picks);
-      setOff(new Set());
+      const labels = ordered.map((id) => catalog.interests.find((x) => x.interestId === id)?.label ?? "").filter((l) => l.length > 0);
+      const byAi = result.by === "ai";
+      setHow({ labels, byAi });
+      const id = await prepareBriefingVideo({
+        catalog, docs: sources, picks: result.picks, templates, speaker, now: new Date(),
+        closingHowText: briefingHowText({ interestLabels: labels, sceneCount: result.picks.length, byAi }),
+      });
+      setSessionId(id);
+      sessionRef.current = id;
+      await withLastProjectKept(() => useProjectStore.getState().loadProject(id));
+      // 確かめる画面で声つきで再生できるよう、先に声を作る（原本で作ってあった声はそのまま使う）。
+      setComposingText("声を用意しています…");
+      const st = useProjectStore.getState();
+      if (sceneUngeneratedVoices(st.scenes, (key) => st.narrationAudioById[key] != null) > 0) {
+        await st.generateAllNarrations();
+        await useProjectStore.getState().saveProject();
+      }
       setStep("review");
     } catch (e) {
-      console.error("[briefing] 組めませんでした:", e);
-      setErrorText(BRIEFING_SESSION_PREPARE_FAILED_MESSAGE);
+      setErrorText(e instanceof BriefingPrepareError ? e.message : BRIEFING_SESSION_PREPARE_FAILED_MESSAGE);
+      if (!(e instanceof BriefingPrepareError)) console.error("[briefing] 組めませんでした:", e);
       setStep("error");
     }
   }
 
+  /** 確かめた内容で仕上げる（書き出しの画面を裏で動かす）。 */
   async function make(): Promise<void> {
+    const id = sessionRef.current;
+    if (!id) return;
     setStep("making");
     try {
-      const id = await prepareBriefingVideo({ catalog, docs: docs ?? [], picks: kept, templates, speaker, now: new Date() });
-      setSessionId(id);
-      sessionRef.current = id;
-      await withLastProjectKept(() => useProjectStore.getState().loadProject(id));
-      // 声がまだの行（原本で作っていなかった）があれば作る。⚠️ 原本の声はそのまま使う（作り直さない）。
       const st = useProjectStore.getState();
-      if (sceneUngeneratedVoices(st.scenes, (key) => st.narrationAudioById[key] != null) > 0) {
-        await st.generateAllNarrations();
-        await st.saveProject();
+      // 外した分だけ「作り方」の一言の場面の数を合わせる（締めの場面＝いつも最後）。
+      const last = st.scenes.at(-1);
+      if (last && how) {
+        const text = briefingHowText({ interestLabels: how.labels, sceneCount: st.scenes.length - 1, byAi: how.byAi });
+        st.updateScene(last.sceneId, (sc) => withClosingHowText(sc, text));
       }
+      const cur = useProjectStore.getState();
+      if (sceneUngeneratedVoices(cur.scenes, (key) => cur.narrationAudioById[key] != null) > 0) await cur.generateAllNarrations();
+      await useProjectStore.getState().saveProject();
       const out = await join(await appDataDir(), TEMPORARY_SESSIONS_DIR_NAME, id, OUTPUT_FILE_NAME);
       useProjectStore.getState().setExportForm({ fileName: "briefing", size: EXPORT_SIZE.full, withSubtitle: true });
       useStartupJobStore.getState().setPendingExport(out, false, true);
       setExporting(true);
     } catch (e) {
-      setErrorText(e instanceof BriefingPrepareError ? e.message : BRIEFING_SESSION_PREPARE_FAILED_MESSAGE);
-      if (!(e instanceof BriefingPrepareError)) console.error("[briefing] 作れませんでした:", e);
+      console.error("[briefing] 作れませんでした:", e);
+      setErrorText(BRIEFING_SESSION_PREPARE_FAILED_MESSAGE);
       setStep("error");
     }
   }
@@ -164,8 +190,7 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
     setSessionId(null);
     sessionRef.current = null;
     setVideoUrl(null);
-    setPicks([]);
-    setOff(new Set());
+    setHow(null);
     setChosen([]);
     setSpeaker(null);
     setErrorText("");
@@ -270,30 +295,10 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
           </div>
         )}
 
-        {step === "composing" && <p className="briefing-student-wait" role="status">あなたに合わせて組み立てています…</p>}
+        {step === "composing" && <p className="briefing-student-wait" role="status">{composingText}</p>}
 
         {step === "review" && (
-          <div className="col gap-lg">
-            <h2 className="briefing-student-q">この内容で作ります（見たくないものは外せます）</h2>
-            <ul className="col gap-xs briefing-student-list">
-              {picks.map((c) => (
-                <li key={c.key}>
-                  <label className="row gap-sm">
-                    <input type="checkbox" checked={!off.has(c.key)} onChange={() => setOff((cur) => { const n = new Set(cur); if (n.has(c.key)) n.delete(c.key); else n.add(c.key); return n; })} />
-                    <span className="grow">{c.title}</span>
-                    <span className="text-sm">{c.matched.map((id) => interestLabel.get(id)).filter(Boolean).join("・")}</span>
-                  </label>
-                </li>
-              ))}
-              <li className="text-sm">最後に、この動画をどう作ったかのひとこと（外せません）</li>
-            </ul>
-            <p>長さ：{minutesLabel(totalSec)}</p>
-            <div className="row gap-sm">
-              <button type="button" className="btn btn-primary btn-lg" onClick={() => void make()} disabled={kept.length === 0}>この内容で作る</button>
-              <button type="button" className="btn btn-secondary" onClick={() => void compose()}>別の案を作る</button>
-              <button type="button" className="btn btn-ghost" onClick={() => setStep("choose")}>選び直す</button>
-            </div>
-          </div>
+          <BriefingStudentEditor onMake={() => void make()} onAnother={() => void compose()} onRestart={() => { void discardSession(); setStep("choose"); }} />
         )}
 
         {step === "making" && (
