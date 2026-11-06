@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "packId": "personalized_briefing",
+  "name": "あなた向け会社説明",
+  "version": "1.0.0",
+  "publisher": "すたりお開発チーム",
+  "description": "説明会・インターン・社内見学で、学生が選んだ興味に合わせて、登録した会社説明動画の場面からその場で説明動画を組んで見せる機能を使えるようにします。動画の中身は入っていません（会社が自分の動画を登録します）。",
+  "minAppVersion": "0.7.0",
+  "contents": { "features": ["personalized-briefing"] },
+  "licenses": [{ "target": "features", "license": "社内利用に限る", "credit": "すたりお開発チーム" }]
+}
