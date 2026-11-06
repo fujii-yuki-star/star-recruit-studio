@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 // あなた向け会社説明の学生の画面（β・ADR-0061 決定3）。
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, configure } from "@testing-library/react";
 import { defaultBriefingCatalog, type BriefingCatalog } from "../../domain/briefing/catalog";
 import type { BriefingCandidate } from "../../domain/briefing/compose";
+
+// ⚠️ **待つ時間を延ばす**＝確かめる画面は本物の部品（場面のカードの絵・仕上がり確認）を描くので、
+//   負荷が高いと既定の 1 秒を越え、**毎回違う検査がたまに落ちた**（2026-11-06）。
+configure({ asyncUtilTimeout: 5000 });
+// 1 本の検査の上限も延ばす（組む → 開く → 作る までを1本で通すため、既定の 5 秒に近づく）。
+vi.setConfig({ testTimeout: 20000 });
 
 const run = vi.hoisted(() => ({
   composeCalls: [] as { chosen: readonly string[]; length: string }[],
@@ -138,6 +144,7 @@ describe("学生の画面", () => {
     fireEvent.click(screen.getByRole("button", { name: /^2\. / }));
     expect(screen.queryByRole("button", { name: "このパートを外す" })).toBeNull();
     expect(screen.getByText("最後のパートです（いつも最後に入ります）。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2. 最後のひとこと" })).toBeTruthy();
   });
 
   it("パートの声を変えると、その声ですぐ作り直す", async () => {
@@ -148,6 +155,11 @@ describe("学生の画面", () => {
     fireEvent.change(sel, { target: { value: "2" } });
     expect(useProjectStore.getState().scenes[0].narration).toMatchObject({ speaker: 2, status: "none" });
     expect(store.generated).toEqual(["scene_001"]);
+    // 作り直している間（pending）は、そのパートの再生と「この内容で作る」を押させない
+    act(() => useProjectStore.getState().updateScene("scene_001", (sc) => ({ ...sc, narration: { ...sc.narration, status: "pending" } })));
+    expect(screen.getByText("声を作っています…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "このパートを再生" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "この内容で作る" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("作るとき、外した分だけ作り方の一言の数を合わせ、書き出しの画面へ「アプリの中の仕事」として渡す", async () => {
@@ -197,6 +209,36 @@ describe("学生の画面", () => {
     await screen.findByRole("button", { name: "説明動画を組む" });
     expect(run.deleted).toEqual(["proj_20261105_901"]);
     expect(useProjectStore.getState().exportRun.phase).toBe("idle");
+  });
+
+  it("受け始める前に仕上げが終わっていても取りこぼさない・別の保存先の完了は今回のものとみなさない", async () => {
+    const out = "C:/data/temporary-sessions/proj_20261105_901/briefing.mp4";
+    render(<BriefingStudentScreen catalog={catalog()} />);
+    fireEvent.click(screen.getByRole("button", { name: "研修" }));
+    fireEvent.click(screen.getByRole("button", { name: "説明動画を組む" }));
+    await screen.findByRole("list", { name: "パートの並び" });
+    // 別の保存先の「終わった」（前の回の結果など）が残っている＝今回のものではない
+    act(() => useProjectStore.getState().setExportRun({ phase: "done", resultPath: "C:/data/other.mp4" }));
+    fireEvent.click(screen.getByRole("button", { name: "この内容で作る" }));
+    await screen.findByTestId("hidden-export");
+    // 受け取る側が動くまで少し待ってから見る（見えた直後に見ると、取り違えが起きる前に確かめてしまう＝変異チェックで判明）
+    await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+    expect(screen.queryByText("「終わる」を押すと、この動画は消えます。")).toBeNull();
+    expect(screen.getByTestId("hidden-export")).toBeTruthy();
+    // 今回の保存先で終わった（購読より前でも、受け始めた時点で見る）
+    act(() => useProjectStore.getState().setExportRun({ phase: "done", resultPath: out }));
+    expect(await screen.findByText("「終わる」を押すと、この動画は消えます。")).toBeTruthy();
+  });
+
+  it("受け始める時点でもう今回の保存先で終わっていたら、そのまま見る画面へ進む", async () => {
+    render(<BriefingStudentScreen catalog={catalog()} />);
+    fireEvent.click(screen.getByRole("button", { name: "研修" }));
+    fireEvent.click(screen.getByRole("button", { name: "説明動画を組む" }));
+    await screen.findByRole("list", { name: "パートの並び" });
+    // 購読より前に終わった形を作る（知らせはもう来ない）
+    act(() => useProjectStore.getState().setExportRun({ phase: "done", resultPath: "C:/data/temporary-sessions/proj_20261105_901/briefing.mp4" }));
+    fireEvent.click(screen.getByRole("button", { name: "この内容で作る" }));
+    expect(await screen.findByText("「終わる」を押すと、この動画は消えます。")).toBeTruthy();
   });
 
   it("仕上げに失敗したら、学生の言葉で知らせる（編集ソフトの文をそのまま出さない）", async () => {

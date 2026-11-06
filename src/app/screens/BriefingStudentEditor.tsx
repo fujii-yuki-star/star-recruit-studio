@@ -23,6 +23,9 @@ function minutesLabel(sec: number): string {
   return `約 ${Math.max(1, Math.round(sec / 60))} 分`;
 }
 
+/** 締めのパートの名前（見出しを持たない＝そのままだと「文字のないパート」になる・実機で確かめた）。 */
+const CLOSING_PART_TITLE = "最後のひとこと";
+
 /** 学生に見せるパートの名前（見出し・無ければ話す文の頭）。 */
 function partTitle(scene: Scene): string {
   const t = (scene.texts.title ?? "").trim();
@@ -60,6 +63,10 @@ export function BriefingStudentEditor({
   const template = templates.find((t) => t.templateId === selected?.templateId);
   const isClosing = selected?.sceneId === closingId;
   const totalSec = scenes.reduce((t, s) => t + s.durationSec, 0);
+  const titleOf = (s: Scene): string => (s.sceneId === closingId ? CLOSING_PART_TITLE : partTitle(s));
+  // 声を作り直している最中か（声を変えた直後＝1つずつ作る道は `isGeneratingNarration` を立てない）。
+  const voiceBusy = (s: Scene | undefined): boolean => !!s && sceneLines(s).some((l) => l.status === NARRATION_STATUS.pending);
+  const anyBusy = generating || scenes.some((s) => voiceBusy(s));
 
   const dnd = useDragReorder(
     (fromId, toIndex) => {
@@ -133,23 +140,27 @@ export function BriefingStudentEditor({
 
       <div className="briefing-editor-main">
         <div className="briefing-editor-preview">
-          <ScenePreview
-            scene={selected}
-            template={template}
-            showSafeArea={false}
-            {...(motion.animActive && motion.playing ? { timeSec: motion.timeSec, animations: motion.previewAnimations } : {})}
-          />
+          {/* ⚠️ 絵は「いちばん近いスクロールする枠の下端」まで広がる（`ScenePreview`）＝高さの決まった枠で包む
+              （包まないと画面いっぱいに広がり、下のパートの並びが見えなくなる＝実機で確かめた）。 */}
+          <div className="briefing-editor-stage">
+            <ScenePreview
+              scene={selected}
+              template={template}
+              showSafeArea={false}
+              {...(motion.animActive && motion.playing ? { timeSec: motion.timeSec, animations: motion.previewAnimations } : {})}
+            />
+          </div>
           <div className="row gap-sm">
             {playing ? (
               <button type="button" className="btn btn-secondary" onClick={stopAll}>止める</button>
             ) : (
-              <button type="button" className="btn btn-primary" onClick={play} disabled={!selected}>このパートを再生</button>
+              <button type="button" className="btn btn-primary" onClick={play} disabled={!selected || voiceBusy(selected)}>このパートを再生</button>
             )}
-            {generating && <span className="text-sm" role="status">声を作っています…</span>}
+            {anyBusy && <span className="text-sm" role="status">声を作っています…</span>}
           </div>
         </div>
         <aside className="card col gap-sm briefing-editor-side">
-          <h3 className="section-title">{selected ? partTitle(selected) : ""}</h3>
+          <h3 className="section-title">{selected ? titleOf(selected) : ""}</h3>
           {isClosing ? (
             <p className="text-sm">最後のパートです（いつも最後に入ります）。</p>
           ) : (
@@ -177,7 +188,7 @@ export function BriefingStudentEditor({
                 onClick={() => { stopAll(); setSelectedId(s.sceneId); }}
                 {...(closing ? {} : dnd.dropProps(i))}
                 style={{ opacity: dnd.draggingId === s.sceneId ? "var(--drag-source-opacity)" : undefined }}
-                aria-label={`${i + 1}. ${partTitle(s)}`}
+                aria-label={`${i + 1}. ${titleOf(s)}`}
               >
                 {!closing && (
                   <div style={{ textAlign: "center", lineHeight: 1, marginBottom: 4 }}>
@@ -185,7 +196,7 @@ export function BriefingStudentEditor({
                   </div>
                 )}
                 {t && <SceneThumb scene={s} template={t} />}
-                <div className="text-sm">{i + 1}. {partTitle(s)}</div>
+                <div className="text-sm">{i + 1}. {titleOf(s)}</div>
               </button>
               {!closing && (
                 <div className="row gap-xs" style={{ justifyContent: "center" }}>
@@ -199,7 +210,7 @@ export function BriefingStudentEditor({
       </div>
 
       <div className="row gap-sm">
-        <button type="button" className="btn btn-primary btn-lg" onClick={() => { stopAll(); onMake(); }} disabled={generating}>この内容で作る</button>
+        <button type="button" className="btn btn-primary btn-lg" onClick={() => { stopAll(); onMake(); }} disabled={anyBusy}>この内容で作る</button>
         <button type="button" className="btn btn-secondary" onClick={() => { stopAll(); onAnother(); }}>別の案を作る</button>
         <button type="button" className="btn btn-ghost" onClick={() => { stopAll(); onRestart(); }}>選び直す</button>
       </div>

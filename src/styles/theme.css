@@ -2163,7 +2163,10 @@ button.flow-step:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 320px;
+}
+.briefing-editor-stage {
+  height: min(50vh, 560px);
+  overflow: auto;
 }
 .briefing-editor-side {
   min-width: 0;

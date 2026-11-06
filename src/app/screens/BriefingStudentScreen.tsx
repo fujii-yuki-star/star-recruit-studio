@@ -71,6 +71,8 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
   const [exitError, setExitError] = useState("");
   // 画面を離れるときに消すため（番号で抜けた）。⚠️ 描画中には書かない（作った・消したときに書く）。
   const sessionRef = useRef<string | null>(null);
+  // 今回の仕上げの保存先（完了の知らせが**この回のもの**かを見分ける＝前の回の結果と取り違えない）。
+  const outRef = useRef<string | null>(null);
 
   // 開いた時・1 時間ごとに、24 時間を過ぎた一時の動画を片づける（決定5）。
   useEffect(() => {
@@ -157,6 +159,7 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
       await useProjectStore.getState().saveProject();
       const out = await join(await appDataDir(), TEMPORARY_SESSIONS_DIR_NAME, id, OUTPUT_FILE_NAME);
       useProjectStore.getState().setExportForm({ fileName: "briefing", size: EXPORT_SIZE.full, withSubtitle: true });
+      outRef.current = out;
       useStartupJobStore.getState().setPendingExport(out, false, true);
       setExporting(true);
     } catch (e) {
@@ -169,9 +172,9 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
   // 裏で動かした書き出しの画面の終わりを受ける（store の変化を購読＝描画のたびに見ない）。
   useEffect(() => {
     if (!exporting) return;
-    return useProjectStore.subscribe((st) => {
+    const onState = (st: ReturnType<typeof useProjectStore.getState>): void => {
       const run = st.exportRun;
-      if (run.phase === EXPORT_RUN_PHASE.done && run.resultPath) {
+      if (run.phase === EXPORT_RUN_PHASE.done && run.resultPath && run.resultPath === outRef.current) {
         setExporting(false);
         setVideoUrl(`${convertFileSrc(run.resultPath)}?t=${Date.now()}`);
         setStep("watch");
@@ -181,7 +184,11 @@ export function BriefingStudentScreen({ catalog }: { catalog: BriefingCatalog })
         setErrorText(BRIEFING_EXPORT_FAILED_MESSAGE);
         setStep("error");
       }
-    });
+    };
+    // ⚠️ **受け始めた時点の状態も見る**＝購読の前に終わっていたら（短い動画・検査）、知らせを取りこぼして「作っています」のまま止まる。
+    const off = useProjectStore.subscribe(onState);
+    onState(useProjectStore.getState());
+    return off;
   }, [exporting]);
 
   /** この回を終える＝一時の動画を消して最初へ（学生が「終わる」を押した・やり直す）。 */
