@@ -350,6 +350,13 @@ button {
   flex: 1;
 }
 
+/* 左の帯の区切り（拡張パックで足す機能を、ほかの項目と分けて見せる・#1336 §3-1）。 */
+.sidebar-sep {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 4px var(--gap-sm);
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -2054,4 +2061,134 @@ button.flow-step:hover:not(:disabled) {
 .flow-bar-reason {
   color: var(--color-danger-text);
   text-align: right;
+}
+
+/* あなた向け会社説明の学生の画面（ADR-0061 決定3）＝全画面の専用モード。大きく押しやすく、編集ソフトの部品は見せない。 */
+.briefing-student {
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+}
+.briefing-student-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.briefing-student-title {
+  font-size: 1.6rem;
+  margin: 0;
+}
+.briefing-student-body {
+  flex: 1;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 32px;
+}
+.briefing-student-q {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.briefing-student-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.briefing-student-card {
+  min-height: 64px;
+  padding: 12px 16px;
+  font-size: 1.1rem;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.briefing-student-card[aria-pressed="true"],
+.briefing-student-card[aria-checked="true"] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-weight: bold;
+}
+.briefing-student-card:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.briefing-student-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 1.1rem;
+}
+.briefing-student-wait {
+  font-size: 1.25rem;
+}
+.briefing-student-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.briefing-student-bar > div {
+  height: 100%;
+  background: var(--color-primary);
+}
+.briefing-student-video {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+  border-radius: var(--radius);
+}
+.briefing-student-exit {
+  position: fixed;
+  top: 80px;
+  right: 32px;
+  z-index: 10;
+  width: 320px;
+}
+
+/* 学生の簡易場面編集（ADR-0061 追補 2026-11-06）＝本来の場面編集と同じカード（.scene-card）を、横に並べる。 */
+.briefing-editor-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+.briefing-editor-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.briefing-editor-stage {
+  height: min(50vh, 560px);
+  overflow: auto;
+}
+.briefing-editor-side {
+  min-width: 0;
+}
+.briefing-editor-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+.briefing-editor-strip.portrait .scene-card {
+  width: 112px;
+}
+.briefing-editor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+}
+@media (max-width: 900px) {
+  .briefing-editor-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

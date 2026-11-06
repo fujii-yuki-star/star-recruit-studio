@@ -6,14 +6,14 @@ import { useStartupJobStore } from './startupJobStore';
 // 画面の作りが変わったときに**この約束だけ壊れても緑のまま**になる。
 describe('頼まれた書き出し先', () => {
   beforeEach(() => {
-    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, notice: null });
+    useStartupJobStore.setState({ pendingExportOut: null, forwarded: false, internal: false, notice: null });
   });
 
   // ⚠️ **1回きり**＝残すと、次に人が押した書き出しまで同じ所へ書く。
   it('取り出せるのは1回だけ', () => {
     const st = useStartupJobStore.getState();
     st.setPendingExport('C:/頼まれた.mp4', true);
-    expect(st.takePendingExport()).toEqual({ out: 'C:/頼まれた.mp4', forwarded: true });
+    expect(st.takePendingExport()).toEqual({ out: 'C:/頼まれた.mp4', forwarded: true, internal: false });
     expect(useStartupJobStore.getState().pendingExportOut, '取り出したのに残っている').toBeNull();
     expect(st.takePendingExport(), '2回目も取り出せている').toBeNull();
   });
@@ -27,6 +27,17 @@ describe('頼まれた書き出し先', () => {
     const st = useStartupJobStore.getState();
     st.setPendingExport('C:/a.mp4', false);
     expect(st.takePendingExport()?.forwarded).toBe(false);
+  });
+
+  // ⚠️ **アプリの中の仕事（あなた向け会社説明）は印を連れていき、取り出したら落とす**（ADR-0061 決定5）＝
+  //   印が残ると、次に起動の仕事として頼まれた書き出しが「返さない」側に入る。
+  it('アプリの中の仕事の印を連れていき、取り出したら落とす', () => {
+    const st = useStartupJobStore.getState();
+    st.setPendingExport('C:/b.mp4', false, true);
+    expect(st.takePendingExport()).toEqual({ out: 'C:/b.mp4', forwarded: false, internal: true });
+    expect(useStartupJobStore.getState().internal).toBe(false);
+    st.setPendingExport('C:/c.mp4', false);
+    expect(st.takePendingExport()?.internal).toBe(false);
   });
 });
 

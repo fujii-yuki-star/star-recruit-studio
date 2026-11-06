@@ -30,8 +30,16 @@ export function creditForLine(line: { speaker?: number | null }, fallbackCredit:
 /** クレジットを数えるのに要る形（文が無い行・場面は声が作られないので数えない）。 */
 type CreditScene = {
   lines?: { speaker?: number | null; text?: string }[] | null;
-  narration?: { text?: string } | null;
+  narration?: { text?: string; speaker?: number | null } | null;
 };
+
+/**
+ * 単独の語りの場面で、名乗りに使う「行」＝語りそのもの（`narration.speaker`・ADR-0073）。掛け合いの場面は null（行で決まる）。
+ * ⚠️ 名乗りを組む所（書き出し・仕上がり確認・切り替え）は、話している行が無いときにこれを渡す＝単独の語りの声も名乗る。
+ */
+export function soloCreditLine(scene: CreditScene): { speaker?: number | null } | null {
+  return scene.lines && scene.lines.length > 0 ? null : (scene.narration ?? null);
+}
 
 /**
  * プロジェクトで実際に使う VOICEVOX クレジットを重複なく集める（#251 About の全列挙・ADR-0025 クレジット集約で共有）。
@@ -63,7 +71,7 @@ export function sceneVoiceCredits(
     if (sc.lines && sc.lines.length > 0) {
       for (const l of sc.lines) if (hasText(l.text)) set.add(creditForLine(l, baseCredit));
     } else if (hasText(sc.narration?.text)) {
-      set.add(baseCredit); // 単一 narration の場面は既定話者
+      set.add(creditForLine(sc.narration ?? {}, baseCredit)); // 単一 narration の場面＝その場面の話者（ADR-0073）か既定話者
     }
   }
   if (set.size === 0) set.add(baseCredit);

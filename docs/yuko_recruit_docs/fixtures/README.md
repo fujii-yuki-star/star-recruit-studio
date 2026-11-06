@@ -10,6 +10,7 @@
 | `project.sample.json` | `project.schema.json` | 上記を `12 §8` の規則で**変換した内部データ**の期待値 |
 | `template-pack/opening_yuko_right_v1/template.json` | `template.schema.json` | テンプレ（category=opening） |
 | `template-pack/photo_left_text_right_yuko_v1/template.json` | `template.schema.json` | テンプレ（category=photo_intro） |
+| `briefing-catalog.sample.json` | `briefing-catalog.schema.json` | あなた向け会社説明の登録（β・ADR-0061）＝興味の項目・使う動画と場面・最後の場面・抜ける番号 |
 
 ## 変換の確認ポイント（`ai-video-plan.sample` → `project.sample`）
 

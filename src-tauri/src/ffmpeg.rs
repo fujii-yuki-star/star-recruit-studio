@@ -3304,7 +3304,7 @@ pub(crate) fn resolve_project_file(
             "動画の保存先を準備できませんでした。もう一度お試しください。",
         )
     })?;
-    Ok(base.join("projects").join(project_id).join(rel_path))
+    Ok(crate::temp_sessions::resolve_project_dir(&base, project_id).join(rel_path))
 }
 
 /// base64(or data URL) をデコードして path へ書き出す（汎用・下/上PNG用）。

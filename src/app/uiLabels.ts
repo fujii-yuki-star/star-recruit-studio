@@ -1,4 +1,6 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import type { BriefingPriority } from "../domain/briefing/catalog";
+import type { BriefingLength } from "../domain/briefing/compose";
 import { isKnownPackFeature, packIdOfScopedId, type ExtensionPackManifest, type PackContentKind, type PackFeature } from "../domain/pack/extensionPack";
 import type { ClipPivotPresetId } from "../domain/timeline/pivot";
 import type { TimelineEditKind } from "../domain/timeline/editKind";
@@ -2299,6 +2301,65 @@ export const PACK_FEATURE_LABEL: Record<PackFeature, string> = {
 };
 /** この版のアプリに無い機能（新しいパックを古いアプリへ入れたとき）。識別子をそのまま画面に出さない（§2-3）。 */
 export const PACK_UNKNOWN_FEATURE_LABEL = "（この版では使えない機能）";
+
+// ── あなた向け会社説明（β・ADR-0061）の登録の画面 ──────────────────────────
+/** 拡張パックが入っていないのにこの画面に来たとき（パックを外した直後など）。 */
+export const BRIEFING_FEATURE_DISABLED_MESSAGE =
+  "この機能は、配られた拡張パックを入れると使えます。「設定」の「拡張パック」から入れてください。";
+/** 登録を読めなかった（⚠️ 例の登録で上書きしない＝そのまま残っていると伝える）。 */
+export const BRIEFING_CATALOG_UNREADABLE_MESSAGE =
+  "登録を読み込めませんでした。登録はそのまま残っています。アプリを開き直してから、もう一度お試しください。";
+/** 登録を保存できなかった。 */
+export const BRIEFING_CATALOG_SAVE_FAILED_MESSAGE = "登録を保存できませんでした。もう一度お試しください。";
+/** 動画を読めなかった（場面の一覧を出せない）。 */
+export const BRIEFING_PROJECT_UNREADABLE_MESSAGE =
+  "この動画を読み込めませんでした。動画の一覧から開けるか確かめてから、もう一度お試しください。";
+/** 登録していた動画が見つからない。 */
+export const BRIEFING_PROJECT_MISSING_MESSAGE = "登録していた動画が見つかりません。「外す」で一覧から外してください。";
+/** 登録していた動画がタイムライン形式（場面を選べない）。 */
+export const BRIEFING_PROJECT_NOT_SCENE_MESSAGE =
+  "この動画はタイムラインで作った動画なので、場面を選べません。「外す」で一覧から外してください。";
+/** 登録していた場面が動画から消えている（数を添える）。 */
+export function briefingScenesMissingMessage(count: number): string {
+  return `登録していた場面のうち${count}個が、動画から消えています。「消えた場面の登録を外す」で整理してください。`;
+}
+/** 抜ける番号の形が違う。 */
+export const BRIEFING_EXIT_CODE_INVALID_MESSAGE = "番号は 4 桁の数字で入れてください。";
+/** 場面の優先度（`BRIEFING_PRIORITIES` の順）を画面の言葉へ。 */
+export const BRIEFING_PRIORITY_LABEL: Record<BriefingPriority, string> = {
+  high: "高い",
+  normal: "ふつう",
+  low: "低い",
+};
+/**
+ * 声の欄（掛け合いの行・単独の語り＝ADR-0073）で「選ばない」ときの言葉。⚠️ 使われるのは**設定画面の「ナレーターの声」**（全動画共通）
+ *＝以前の「動画全体の声に合わせる」は中身とずれていた（利用者判断 2026-11-06＝案1）。
+ */
+export const VOICE_FOLLOW_NARRATOR_LABEL = "ナレーターの声（設定）に合わせる";
+/** 学生の画面を始める前に、抜ける番号が決まっていない（管理者の画面）。 */
+export const BRIEFING_START_NEEDS_CODE_MESSAGE =
+  "学生の画面を始める前に、下の「学生の画面から抜ける番号」を決めてください。";
+
+// ── あなた向け会社説明（β・ADR-0061 決定3）の学生の画面 ──────────────────────
+// ⚠️ **学生に向けた言葉**＝「場面」「書き出し」「見た目パターン」を出さない。困ったら「担当の人」へ。
+/** 選んだことに合う説明が無い。 */
+export const BRIEFING_NO_SCENES_MESSAGE = "選んだことに合う説明が見つかりませんでした。ほかの項目も選んでみてください。";
+/** その日の一時の動画が多すぎる（番号が尽きた）。 */
+export const BRIEFING_SESSION_FULL_MESSAGE = "今日はこれ以上作れません。担当の人に声をかけてください。";
+/** 一時の動画を作れなかった。 */
+export const BRIEFING_SESSION_PREPARE_FAILED_MESSAGE =
+  "説明動画を作れませんでした。もう一度お試しください。うまくいかないときは、担当の人に声をかけてください。";
+/** 動画を仕上げられなかった。 */
+export const BRIEFING_EXPORT_FAILED_MESSAGE =
+  "説明動画を仕上げられませんでした。もう一度お試しください。うまくいかないときは、担当の人に声をかけてください。";
+/** 抜ける番号が違う。 */
+export const BRIEFING_EXIT_CODE_WRONG_MESSAGE = "番号が違います。もう一度入れてください。";
+/** 学生が選ぶ長さの言葉（`BRIEFING_LENGTHS` の順）。 */
+export const BRIEFING_LENGTH_LABEL: Record<BriefingLength, string> = {
+  short: "短め（1 分ほど）",
+  normal: "ふつう（2 分ほど）",
+  long: "しっかり（3 分ほど）",
+};
 /** 中身の種類（`licenses[].target`）を画面の言葉へ。 */
 export const PACK_CONTENT_LABEL: Record<PackContentKind, string> = {
   templates: "見た目パターン",

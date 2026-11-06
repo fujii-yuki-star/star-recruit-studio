@@ -55,6 +55,22 @@ export const ASSIST_MIN_LENGTH = 8;
 // 動画の名前の候補の字数の上限（#1316）と、題名の材料にする内容の字数の上限（長い動画でも指示文を伸ばしすぎない）。
 export const ASSIST_VIDEO_TITLE_MAX_LENGTH = 24;
 export const ASSIST_VIDEO_SUMMARY_MAX_LENGTH = 400;
+// あなた向け会社説明（β・ADR-0061 決定4・12 §11）。学生が選ぶ長さ（短め／ふつう／しっかり）の秒の範囲（最後の場面は数えない）、
+// 同梱の AI に見せる場面の数の上限（2B の指示文を伸ばしすぎない）、場面ごとに見せるセリフの字数の上限。
+export const BRIEFING_SHORT_MIN_SEC = 40;
+export const BRIEFING_SHORT_MAX_SEC = 80;
+export const BRIEFING_NORMAL_MIN_SEC = 90;
+export const BRIEFING_NORMAL_MAX_SEC = 150;
+export const BRIEFING_LONG_MIN_SEC = 150;
+export const BRIEFING_LONG_MAX_SEC = 240;
+export const BRIEFING_AI_CANDIDATE_MAX = 40;
+export const BRIEFING_AI_SPEECH_MAX_LENGTH = 60;
+// 一時の動画の番号の帯（ADR-0061 決定5・11 §7.9）＝その日のこの数より上から採る（通常の動画の番号と重ならない）。
+export const BRIEFING_SESSION_ID_FLOOR = 900;
+// 最後の場面（「すたりおで作りました」）の長さ（秒・ADR-0061 判断3）。
+export const BRIEFING_CLOSING_DURATION_SEC = 6;
+// 学生が選べる声の数（「元の声のまま」は数えない・ADR-0073）。多すぎると選ぶのが手間。
+export const BRIEFING_VOICE_CHOICE_MAX = 6;
 // 写真・動画を場面へソフトが当てるとき、これ未満の言葉の重なり（0〜1）は「自信が低い」（ADR-0052 決定5・12 §8.8）。
 export const ASSET_MATCH_MIN_SCORE = 0.2;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる

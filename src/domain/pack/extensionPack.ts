@@ -308,6 +308,13 @@ export function replacePackTemplates(templates: readonly Template[], packTemplat
 /** アプリに組み込んである機能の名前（パックの鍵で出す・ADR-0060 決定1）。 */
 export const KNOWN_PACK_FEATURES = ['personalized-briefing'] as const;
 export type PackFeature = (typeof KNOWN_PACK_FEATURES)[number];
+/** 組み込み機能の名前を参照する定数（§6：文字列直書きを避ける）。 */
+export const PACK_FEATURE = { personalizedBriefing: 'personalized-briefing' } as const satisfies Record<string, PackFeature>;
+
+/** 入っているパックがその組み込み機能を有効にしているか（左の帯に出すか・ADR-0060 決定1）。 */
+export function isPackFeatureEnabled(manifests: readonly ExtensionPackManifest[], feature: PackFeature): boolean {
+  return enabledFeatures(manifests, KNOWN_PACK_FEATURES).has(feature);
+}
 
 /** 組み込み機能の名前か（知らない名前＝新しいパックを古いアプリへ入れたとき）。 */
 export function isKnownPackFeature(f: string): f is PackFeature {

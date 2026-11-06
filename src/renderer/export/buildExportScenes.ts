@@ -13,7 +13,7 @@ import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { fontFamilyForId, resolveFontId } from '../../domain/font/fontCatalog';
-import { NARRATOR_CREDIT, sceneCreditText } from '../../domain/voice/narratorCredit';
+import { NARRATOR_CREDIT, sceneCreditText, soloCreditLine } from '../../domain/voice/narratorCredit';
 import type { CreditDisplay } from '../../domain/voice/creditDisplay';
 import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
@@ -274,7 +274,7 @@ export async function buildExportScenes(
   // 数える場面と書き出される場面は一致する。
   const creditVisible = sceneCreditVisibility(scenes, opts.creditDisplay);
   // 文はプレビューと同じ共有関数（`sceneCreditText`）＝「最初と最後」は全員を縦に・「ずっと表示」は話している行（ADR-0025 追補）。
-  const creditFor = (index: number): string | undefined => (creditVisible[index] ? sceneCreditText(opts.creditDisplay, scenes, null, baseCredit) : undefined);
+  const creditFor = (index: number): string | undefined => (creditVisible[index] ? sceneCreditText(opts.creditDisplay, scenes, soloCreditLine(scenes[index]), baseCredit) : undefined);
   const out: ExportSceneData[] = [];
   // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
   const bail = (): void => {
@@ -363,7 +363,7 @@ export async function buildExportScenes(
             const spec = specs[k];
             // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動・ADR-0025 追補）。
             const segLine = spec.lineId ? lines.find((l) => l.lineId === spec.lineId) : undefined;
-            const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
+            const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine ?? soloCreditLine(scene), baseCredit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
                 ? layoutScene(scene, template, { projectFontId, subtitleText: spec.subtitleText, subtitleSegment: spec })
@@ -664,7 +664,7 @@ export async function buildExportScenes(
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
           // クレジットの文は `sceneCreditText`（「ずっと表示」のときだけ行の話者に連動＝無ければ既定の声・ADR-0025 追補）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
-          const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine, baseCredit) : credit;
+          const segCredit = credit != null ? sceneCreditText(opts.creditDisplay, scenes, segLine ?? soloCreditLine(scene), baseCredit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
           const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
           // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。

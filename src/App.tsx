@@ -39,6 +39,10 @@ import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { HelpScreen } from "./app/screens/HelpScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
+import { BriefingAdminScreen } from "./app/screens/BriefingAdminScreen";
+import { isPackFeatureEnabled, PACK_FEATURE } from "./domain/pack/extensionPack";
+import { BriefingStudentScreen } from "./app/screens/BriefingStudentScreen";
+import { useBriefingStudentStore } from "./app/store/briefingStudentStore";
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
@@ -104,6 +108,9 @@ function App() {
   // 起動のときに頼まれた仕事（取り込み・書き出し）を進める（ADR-0042・#1184）。
   useStartupJob(navigate);
   const startupNotice = useStartupJobStore((st) => st.notice);
+  // あなた向け会社説明（β・ADR-0061 決定1）＝拡張パックの鍵があるときだけ左の帯に出す。
+  const packs = useProjectStore((st) => st.packs);
+  const briefingEnabled = isPackFeatureEnabled(packs, PACK_FEATURE.personalizedBriefing);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
   // 見た目（ADR-0039・#1108）。⚠️ **ここで購読する**＝設定画面を開いていなくても、
@@ -190,6 +197,8 @@ function App() {
         return <HelpScreen />;
       case "about":
         return <AboutScreen />;
+      case "briefing":
+        return <BriefingAdminScreen enabled={briefingEnabled} />;
       default:
         return <HomeScreen onNavigate={navigate} />;
     }
@@ -199,8 +208,12 @@ function App() {
   // 共通トップバーの「保存」とバッジは**場面形式の文書**を保存する（projectStore）。タイムライン形式は
   // 別の文書なので出さない＝見ている文書と違うものが保存される／場面文書を開いていないときは空の
   // プロジェクトが新しく作られる、を防ぐ（ADR-0026④）。画面は自前の見出し（PageHead）を持つ。
+  // 学生の画面（ADR-0061 決定3）＝入っている間は**それだけ**を出す（左の帯・ほかの画面・知らせを出さない）。
+  const studentCatalog = useBriefingStudentStore((st) => st.catalog);
   const hasOwnHeader =
     screen === "scene-edit" || screen === "generating" || screen === "looks-edit" || screen === "timeline-project";
+
+  if (studentCatalog) return <BriefingStudentScreen catalog={studentCatalog} />;
 
   return (
     <div className="app">
@@ -236,6 +249,7 @@ function App() {
           onNavigate={navigate}
           currentProjects={currentProjects}
           onCollapse={() => setSidebarCollapsed(true)}
+          briefingEnabled={briefingEnabled}
         />
       )}
       <div className="main">

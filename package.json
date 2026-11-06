@@ -1,7 +1,7 @@
 {
   "name": "star-recruit-studio",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "validate:schemas": "node scripts/validate-schemas.mjs",
     "validators:build": "node scripts/compile-validators.mjs",
+    "pack:briefing": "node scripts/make-starpack.mjs packs/personalized-briefing/pack release/personalized_briefing_1.0.0.starpack",
     "predev": "npm run validators:build && npm run check:voicevox-copy",
     "prebuild": "npm run validators:build",
     "pretest": "npm run validators:build",

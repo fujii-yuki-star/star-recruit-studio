@@ -19,3 +19,5 @@ export const validateProject: StandaloneValidate;
 export const validateTimelineProject: StandaloneValidate;
 /** extension-pack.schema.json（拡張パックの manifest・ADR-0060）の事前コンパイル済み検証関数。 */
 export const validateExtensionPack: StandaloneValidate;
+/** briefing-catalog.schema.json（あなた向け会社説明の登録・β・ADR-0061）の事前コンパイル済み検証関数。 */
+export const validateBriefingCatalog: StandaloneValidate;

@@ -108,6 +108,7 @@ import {
   PencilIcon,
 } from "../components/icons";
 import { getBooleanSetting, setBooleanSetting } from "../../infrastructure/appSettings";
+import { SpeakerSelect } from "../components/SpeakerSelect";
 
 interface SceneEditProps {
   onNavigate: (screen: ScreenId) => void;
@@ -2272,23 +2273,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           companyName={companyName}
                           onPick={(t) => patch((s) => updateLine(s, line.lineId, { text: t }))}
                         />}
-                        <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="text-sm text-muted">声</span>
-                          <select
-                            className="select text-sm"
-                            value={line.speaker ?? ""}
-                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { speaker: e.target.value ? Number(e.target.value) : null }))}
-                          >
-                            <option value="">動画全体の声に合わせる</option>
-                            {voices.map((c) => (
-                              <optgroup key={c.character} label={c.character}>
-                                {c.styles.map((st) => (
-                                  <option key={st.speaker} value={st.speaker}>{c.character}（{st.label}）</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        </div>
+                        <SpeakerSelect
+                          value={line.speaker}
+                          voices={voices}
+                          onChange={(speaker) => patch((s) => updateLine(s, line.lineId, { speaker }))}
+                        />
                         <details>
                           <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
                           <LineVoiceParam
@@ -2457,6 +2446,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </button>
                 </div>
               </div>
+              {/* この場面の語りの声（ADR-0073 段階2）。空＝ナレーターの声（設定）。変えたら作り直し（速さ・高さと同じ）。 */}
+              <SpeakerSelect
+                value={selected.narration.speaker}
+                voices={voices}
+                ariaLabel="この場面の声"
+                onChange={(speaker) => patch((s) => (
+                  (s.narration.speaker ?? null) === speaker ? s : { ...s, narration: { ...s.narration, speaker, status: NARRATION_STATUS.none } }
+                ))}
+              />
               <details>
                 <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
                 {/* この場面のナレーションの声を場面ごとに上書き。null=動画全体（設定画面）を継承。変更で status をリセット＝作り直し（#249）。 */}
