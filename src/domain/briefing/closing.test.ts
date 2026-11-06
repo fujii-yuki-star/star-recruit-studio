@@ -104,3 +104,13 @@ describe('学生がパートを動かす先', () => {
     expect(briefingMoveTarget(-1, 3)).toBe(0);
   });
 });
+
+describe('縦の作り方の一言（実機 2026-11-06）', () => {
+  it('縦でも横と同じ大きさ（割合で決めると小さすぎた）・折り返しの余白（2 行）を持つ', () => {
+    const land = byName(buildBriefingClosingScene(input({ howText: 'x' }))!.freeLayout, '作り方');
+    const port = byName(buildBriefingClosingScene(input({ howText: 'x', orientation: '9:16' }))!.freeLayout, '作り方');
+    expect(port.fontSize).toBe(land.fontSize);
+    expect(port.fontSize).toBeGreaterThanOrEqual(32);
+    expect(port.h).toBeGreaterThanOrEqual(Math.ceil(port.fontSize! * 1.5 * 2));
+  });
+});

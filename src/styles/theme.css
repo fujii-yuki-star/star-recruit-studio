@@ -2177,6 +2177,9 @@ button.flow-step:hover:not(:disabled) {
   overflow-x: auto;
   padding: 4px 2px 8px;
 }
+.briefing-editor-strip.portrait .scene-card {
+  width: 112px;
+}
 .briefing-editor-item {
   display: flex;
   flex-direction: column;
