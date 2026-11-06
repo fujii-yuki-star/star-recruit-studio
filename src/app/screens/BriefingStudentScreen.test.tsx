@@ -147,6 +147,19 @@ describe("学生の画面", () => {
     expect(screen.getByRole("button", { name: "2. 最後のひとこと" })).toBeTruthy();
   });
 
+  it("縦の動画では、パートの並びのカードを細くする", async () => {
+    // 開いた一時の動画が縦（組む前に `newProject` で動画の設定が戻るので、開く所で縦にする）
+    useProjectStore.setState({
+      loadProject: vi.fn(async () => {
+        useProjectStore.setState((st) => ({ scenes: openedScenes(), meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, aspectRatio: "9:16" } } }));
+      }),
+    } as never);
+    render(<BriefingStudentScreen catalog={catalog()} />);
+    fireEvent.click(screen.getByRole("button", { name: "研修" }));
+    fireEvent.click(screen.getByRole("button", { name: "説明動画を組む" }));
+    expect((await screen.findByRole("list", { name: "パートの並び" })).className).toContain("portrait");
+  });
+
   it("パートの声を変えると、その声ですぐ作り直す", async () => {
     render(<BriefingStudentScreen catalog={catalog()} />);
     fireEvent.click(screen.getByRole("button", { name: "研修" }));

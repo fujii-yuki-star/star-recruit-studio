@@ -8,7 +8,7 @@
 // ⚠️ 学生には「場面」と言わない＝「パート」と呼ぶ（決定3＝編集ソフトの言葉を出さない）。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sceneLines, narrationAudioKey } from "../../domain/project/narrationLines";
-import { NARRATION_STATUS } from "../../domain/enums";
+import { NARRATION_STATUS, ORIENTATION } from "../../domain/enums";
 import type { Scene } from "../../domain/project/types";
 import { briefingMoveTarget } from "../../domain/briefing/closing";
 import { SceneThumb } from "../components/SceneThumb";
@@ -53,6 +53,7 @@ export function BriefingStudentEditor({
   const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const generating = useProjectStore((s) => s.isGeneratingNarration);
   const voices = useVoiceCatalog();
+  const portrait = useProjectStore((s) => s.meta.videoSettings.aspectRatio) === ORIENTATION.portrait;
   const [selectedId, setSelectedId] = useState<string>(() => useProjectStore.getState().scenes[0]?.sceneId ?? "");
   const stripRef = useRef<HTMLDivElement>(null);
 
@@ -175,7 +176,8 @@ export function BriefingStudentEditor({
         </aside>
       </div>
 
-      <div className="briefing-editor-strip" ref={stripRef} role="list" aria-label="パートの並び">
+      {/* 縦の動画はカードを細くする（同じ幅だと絵が縦に長く、並びが画面の下へはみ出した＝実機）。 */}
+      <div className={`briefing-editor-strip${portrait ? " portrait" : ""}`} ref={stripRef} role="list" aria-label="パートの並び">
         {scenes.map((s, i) => {
           const t = templates.find((x) => x.templateId === s.templateId);
           const closing = s.sceneId === closingId;

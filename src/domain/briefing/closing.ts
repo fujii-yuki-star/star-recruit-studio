@@ -37,9 +37,10 @@ export function briefingHowText(input: { interestLabels: readonly string[]; scen
  * 向きごとの寸法。**ロゴ → 差し色の線 → 文**を1つのまとまりにして、画面の縦の真ん中に置く（ロゴが無ければ線と文だけ）。
  * 下の端に差し色の帯を敷く（締めの場面だと分かる・会社の色が入る）。
  */
-const LAYOUT: Record<Orientation, { w: number; h: number; logo: { w: number; h: number }; textW: number; textLines: number; fontSize: number; gap: number }> = {
-  [ORIENTATION.landscape]: { w: 1920, h: 1080, logo: { w: 640, h: 260 }, textW: 1440, textLines: 2, fontSize: 52, gap: 48 },
-  [ORIENTATION.portrait]: { w: 1080, h: 1920, logo: { w: 760, h: 340 }, textW: 980, textLines: 3, fontSize: 40, gap: 56 },
+const LAYOUT: Record<Orientation, { w: number; h: number; logo: { w: number; h: number }; textW: number; textLines: number; fontSize: number; howFontSize: number; gap: number }> = {
+  [ORIENTATION.landscape]: { w: 1920, h: 1080, logo: { w: 640, h: 260 }, textW: 1440, textLines: 2, fontSize: 52, howFontSize: 32, gap: 48 },
+  // ⚠️ 縦は文が小さい（横幅が狭い）ので、作り方の一言は締めの文に対する割合で決めると小さすぎた（実機・2026-11-06）＝横と同じ大きさにして 2 行へ折り返す。
+  [ORIENTATION.portrait]: { w: 1080, h: 1920, logo: { w: 760, h: 340 }, textW: 980, textLines: 3, fontSize: 40, howFontSize: 32, gap: 56 },
 };
 
 /** 文の行間（倍率）。 */
@@ -47,8 +48,7 @@ const LINE_HEIGHT = 1.5;
 /** 差し色の線と、下の端の帯の太さ。 */
 const BAR = { w: 120, h: 8 };
 const FOOT_H = 14;
-/** 「作り方」の一言の文字の大きさ（締めの文に対する割合）と行数（折り返しの余白）。 */
-const HOW_FONT_RATIO = 0.62;
+/** 「作り方」の一言の行数（折り返しの余白）。文字の大きさは向きごと（`LAYOUT.howFontSize`）。 */
 const HOW_LINES = 2;
 /** 締めの場面の「作り方」の一言の部品の名前（`buildBriefingClosingScene` が付け、`withClosingHowText` が探す）。 */
 const HOW_ELEMENT_NAME = '作り方';
@@ -84,7 +84,7 @@ export function buildBriefingClosingScene(input: BriefingClosingInput): Scene | 
   const textH = Math.ceil(L.fontSize * LINE_HEIGHT * L.textLines);
   const logoBlock = input.logoAssetId ? L.logo.h + L.gap : 0;
   const how = input.howText?.trim() ?? '';
-  const howFont = Math.round(L.fontSize * HOW_FONT_RATIO);
+  const howFont = L.howFontSize;
   const howH = Math.ceil(howFont * LINE_HEIGHT * HOW_LINES);
   const howBlock = how ? Math.round(L.gap / 2) + howH : 0;
   const top = Math.round((L.h - (logoBlock + BAR.h + L.gap + textH + howBlock)) / 2);
