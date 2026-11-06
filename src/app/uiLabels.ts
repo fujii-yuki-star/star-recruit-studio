@@ -2331,6 +2331,11 @@ export const BRIEFING_PRIORITY_LABEL: Record<BriefingPriority, string> = {
   normal: "ふつう",
   low: "低い",
 };
+/**
+ * 声の欄（掛け合いの行・単独の語り＝ADR-0073）で「選ばない」ときの言葉。⚠️ 使われるのは**設定画面の「ナレーターの声」**（全動画共通）
+ *＝以前の「動画全体の声に合わせる」は中身とずれていた（利用者判断 2026-11-06＝案1）。
+ */
+export const VOICE_FOLLOW_NARRATOR_LABEL = "ナレーターの声（設定）に合わせる";
 /** 学生の画面を始める前に、抜ける番号が決まっていない（管理者の画面）。 */
 export const BRIEFING_START_NEEDS_CODE_MESSAGE =
   "学生の画面を始める前に、下の「学生の画面から抜ける番号」を決めてください。";
