@@ -147,7 +147,21 @@ fn app_data(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn briefing_session_create(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
-    create_in(&app_data(&app)?, &project_id, now_ms())
+    create_in(&app_data(&app)?, &project_id, now_ms())?;
+    // ⚠️ 置き場は起動時に作らない＝初めて作ったこの時に `asset://` の許可を足す（足さないと写真が 403）。
+    allow_asset_scope(&app, &sessions_dir(&app)?);
+    Ok(())
+}
+
+/// 一時の置き場を `asset://` の許可に足す（`projects/**` と同じ深さ）。失敗は記録だけ（写真が出ないだけ＝作るのは止めない）。
+pub fn allow_asset_scope(app: &tauri::AppHandle, dir: &Path) {
+    if let Err(e) = app.asset_protocol_scope().allow_directory(dir, true) {
+        crate::tlog!(
+            "asset_scope",
+            "一時の説明動画の置き場の許可を足せない {:?}: {e}",
+            dir
+        );
+    }
 }
 
 #[tauri::command]
@@ -171,6 +185,10 @@ pub fn cleanup_on_startup(app: &tauri::AppHandle) {
     let Ok(base) = app_data(app) else {
         return;
     };
+    // ⚠️ **置き場が無ければ何もしない**（スレッドも起こさない）＝拡張パックを使っていない人には一切動かさない（ADR-0061 決定1）。
+    if !base.join(SESSIONS_DIR_NAME).is_dir() {
+        return;
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let n = cleanup_in(&base, now_ms(), SESSION_MAX_AGE);
         if n > 0 {

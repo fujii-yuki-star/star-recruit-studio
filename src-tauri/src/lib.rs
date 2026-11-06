@@ -941,13 +941,15 @@ fn user_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("user_assets"))
 }
 
-/// 同梱したチュートリアル映像の置き場所（#1229）。⚠️ **同梱物**＝入れたときに置かれる（`bundle.resources`）。
-/// 素材と同じ口（`asset://`）で読む＝途中から読めるので、シークバーで先へ飛べる（埋め込みの口は飛べない）。
 /// 一時の説明動画の置き場（ADR-0061 決定5）＝`asset://` の許可に載せる（`projects/**` と同じ深さ）。
+/// ⚠️ **起動時には作らない**（拡張パックの無い人には一切動かさない＝ADR-0061 決定1）＝在るときだけ許可し、
+///   無ければ最初に一時の動画を作るとき（`briefing_session_create`）に作って許可する。
 fn temporary_sessions_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     temp_sessions::sessions_dir(app)
 }
 
+/// 同梱したチュートリアル映像の置き場所（#1229）。⚠️ **同梱物**＝入れたときに置かれる（`bundle.resources`）。
+/// 素材と同じ口（`asset://`）で読む＝途中から読めるので、シークバーで先へ飛べる（埋め込みの口は飛べない）。
 fn tutorials_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().resource_dir().map_err(|e| e.to_string())?;
     Ok(base.join("tutorials"))
@@ -1156,11 +1158,6 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
             "素材の置き場が許可に当たらない＝写真が出ません",
         ),
         (
-            temporary_sessions_dir(app),
-            true,
-            "一時の説明動画の置き場が許可に当たらない＝説明動画の写真が出ません",
-        ),
-        (
             user_assets_dir(app),
             false,
             "素材の棚が許可に当たらない＝棚の写真が出ません",
@@ -1216,6 +1213,12 @@ fn ensure_asset_scope_dirs(app: &tauri::AppHandle) {
                 canon,
                 patterns
             );
+        }
+    }
+    // 一時の説明動画の置き場（ADR-0061）＝**在るときだけ**許可する（作らない＝パックの無い人には何もしない）。
+    if let Ok(dir) = temporary_sessions_dir(app) {
+        if dir.is_dir() {
+            temp_sessions::allow_asset_scope(app, &dir);
         }
     }
 }

@@ -467,9 +467,9 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 - **動画のフォルダの決め方**（Rust の `project_dir`・`resolve_project_file`）＝`projects/<id>` が在ればそちら → 無くて `temporary-sessions/<id>` が在ればそちら → どちらも無ければ `projects/<id>`。⚠️ **通常の動画が先**＝一時の動画のために通常の動画の置き場所が別の所へ向くことは無い。画面が自分で道を組む所（`asset://`）は、作った番号を覚えて置き場所を選ぶ（`projectLocation.ts`）。
 - **作る**（`briefing_session_create`）＝どちらかの置き場所に同じ番号が在れば断る。作った時刻を `session.json`（`{createdAtMs}`）に書く。
 - **ファイル**（`briefing_session_copy_files`）＝原本から**名前を変えて**コピーする（場面の取り込みで番号を付け替えるため・`importScenes` の `files`）。⚠️ コピー先は一時の動画だけ・原本には書かない・途中で失敗したらコピーした分を消す・同じ新しい名前へ2回は書かない。元に無いファイルは `missing` で返す（黙って飛ばさない）。
-- **消す**＝作ってから **24 時間**（`session.json` の時刻・読めなければフォルダの時刻・どちらも無ければ消さない）。アプリの起動時（`cleanup_stale_export_dirs` と並べる）と、この機能を開いた時・1 時間ごと（`briefing_sessions_cleanup`）。「この回のデータを消す」は `briefing_session_delete`。⚠️ **消すのは `temporary-sessions/` の直下の、番号の形のフォルダだけ**（原本・素材の棚・見た目パターン・登録には触らない）。書き出した物も同じフォルダに置く＝一緒に消える。
+- **消す**＝作ってから **24 時間**（`session.json` の時刻・読めなければフォルダの時刻・どちらも無ければ消さない）。アプリの起動時（`cleanup_stale_export_dirs` と並べる・置き場が在るときだけ）と、この機能を開いた時・1 時間ごと（`briefing_sessions_cleanup`）。「この回のデータを消す」は `briefing_session_delete`。⚠️ **消すのは `temporary-sessions/` の直下の、番号の形のフォルダだけ**（原本・素材の棚・見た目パターン・登録には触らない）。書き出した物も同じフォルダに置く＝一緒に消える。
 - **仕上げた動画**＝一時の動画のフォルダの直下 `briefing.mp4`（書き出しの画面を裏で動かして書く＝保存先は「アプリの中の仕事」として渡し、起動の仕事としては返さない＝`startupJobStore.internal`）。フォルダごと消えるので 24 時間で一緒に消える。
-- `asset://` の許可＝`$APPDATA/temporary-sessions/**`（`projects/**` と同じ深さ・起動時に作って許可する）。
+- `asset://` の許可＝`$APPDATA/temporary-sessions/**`（`projects/**` と同じ深さ）。⚠️ **置き場は起動時に作らない**＝在るときだけ起動時に許可し、無ければ最初に一時の動画を作ったとき（`briefing_session_create`）に作って許可する。起動時の片づけも置き場が無ければ何もしない（スレッドも起こさない）＝**拡張パックを使っていない人には一切動かない**（ADR-0061 決定1）。
 - **組み立て**（`buildBriefingProject`・純粋関数）＝組んだ並びの場面を原本から取り込み（`importScenes`）、最後の場面を足して `project.json` を作る。
   - **向きは1つ**＝最初の場面の動画の向きにそろえ、違う向きの動画の場面は入れずに知らせる（`skippedOrientation`）。動画の設定・声の既定・会社の情報・BGM は最初の場面の動画から写す。パートは1つ（`part_001`）。
   - **声**＝単独のナレーション（掛け合いでない・話す文がある）の場面だけ、選んだ声（`narration.speaker`＝ADR-0073）にして作り直す（`status: pending`・`voicePath: null`・その元の声のファイルはコピーしない）。掛け合いの場面は元の声とファイルのまま（ADR-0061 判断2）。
