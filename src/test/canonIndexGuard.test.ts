@@ -21,8 +21,9 @@ const DOCS_DIR = 'docs/yuko_recruit_docs';
  *
  * ⚠️ **実数で縛る**＝「短く保つ」と書くだけでは、1行ずつ足されて元へ戻る（実際に 50,916字まで育った）。
  * 上限に当たったら**まず ADR 本体へ移せないかを考える**（増やすのは最後の手段）。
+ * ⚠️ **16,000 → 16,500**（ADR-0075 決定4）＝γ の同居で「γ では α の規約を当てはめない」を毎回読まれる冒頭に置くため。上げ幅はその数行分に限る。
  */
-export const CLAUDE_MAX_CHARS = 16000;
+export const CLAUDE_MAX_CHARS = 16500;
 
 /** 状態の語（`CLAUDE.md` が持ってはいけないもの＝一覧は `adr/README.md` に1つ）。 */
 const STATUS_WORDS = ['Accepted', 'Proposed', 'Superseded', 'Rejected'];
@@ -358,7 +359,8 @@ describe('正典の索引（二重管理へ戻らない）', () => {
     // ⚠️ **+1**（ADR-0062）＝書き出しの文字を正しい字体で焼く。
     // ⚠️ **+1**（ADR-0070）＝書き出しのコマを別の窓でも描く。
     // ⚠️ **+1**（ADR-0074）＝姉妹ソフト γ の設計の大枠。
-    expect(bodies.length, 'ADR の本数が変わりました。数を直してから、走査が欠けていないか見てください').toBe(74);
+    // ⚠️ **+1**（ADR-0075）＝γ をこのリポジトリに同居させる境界。
+    expect(bodies.length, 'ADR の本数が変わりました。数を直してから、走査が欠けていないか見てください').toBe(75);
     expect(
       adrHeadingDrift(bodies),
       '見出しの括弧書きは状態に合わせてください（`adr-new` スキル＝Proposed のときだけ「決定（Proposed）」）',
@@ -604,7 +606,7 @@ describe('門番自身の検査（わざと壊した入力を通す）', () => {
     expect(brokenDocLinks([['docs/a/x.md', '[y](https://example.com) [z](#midashi)']], () => false)).toEqual([]);
   });
 
-  it('上限は 16,000 字（相対で書かず実数で固定する）', () => {
-    expect(CLAUDE_MAX_CHARS).toBe(16000);
+  it('上限は 16,500 字（相対で書かず実数で固定する・ADR-0075 で 16,000 から上げた）', () => {
+    expect(CLAUDE_MAX_CHARS).toBe(16500);
   });
 });
