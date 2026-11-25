@@ -131,7 +131,10 @@ describe("学生の画面", () => {
     fireEvent.click(screen.getByRole("button", { name: "「研修のようす」を後ろへ" }));
     expect(useProjectStore.getState().scenes.map((x) => x.sceneId)).toEqual(["scene_002", "scene_001", "scene_003"]);
     // 締めの手前より後ろへは行けない・締めには並べ替えの印が無い
-    expect((screen.getByRole("button", { name: "「研修のようす」を後ろへ" }) as HTMLButtonElement).disabled).toBe(true);
+    // ⚠️ **画面が追いつくのを待つ**＝確かめる画面は「見えた」直後だと、store を見張る仕掛け（useSyncExternalStore の購読＝描いた後の副作用）が
+    //   まだ付いていないことがある。負荷が高いとその隙に押した並べ替えが画面へ届かず、store は変わったのにボタンは古いまま（#1548・CI でまれに落ちた）。
+    //   購読が付いた時点で React が追いつくので、**期待はそのまま**で待つ。
+    await waitFor(() => expect((screen.getByRole("button", { name: "「研修のようす」を後ろへ" }) as HTMLButtonElement).disabled).toBe(true));
     expect(screen.queryByRole("button", { name: /すたりおで作りました。.*を前へ/ })).toBeNull();
     expect(strip.querySelectorAll("[role=listitem]")).toHaveLength(3);
     // 外す（選んで「このパートを外す」）
@@ -170,7 +173,8 @@ describe("学生の画面", () => {
     expect(store.generated).toEqual(["scene_001"]);
     // 作り直している間（pending）は、そのパートの再生と「この内容で作る」を押させない
     act(() => useProjectStore.getState().updateScene("scene_001", (sc) => ({ ...sc, narration: { ...sc.narration, status: "pending" } })));
-    expect(screen.getByText("声を作っています…")).toBeTruthy();
+    // ⚠️ 同じ隙（#1548）＝確かめる画面が見えた直後は、store の変化がまだ画面へ届かないことがある（負荷をかけて再現した）。
+    expect(await screen.findByText("声を作っています…")).toBeTruthy();
     expect((screen.getByRole("button", { name: "このパートを再生" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "この内容で作る" }) as HTMLButtonElement).disabled).toBe(true);
   });
