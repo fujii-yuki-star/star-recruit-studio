@@ -42,5 +42,6 @@ AI が「どれを読むか」を決めるとき、**読まなくてよいもの
 | [`adr/0034`](../adr/0034-timeline-interaction-model.md) | 同上＋`2026-08-video-editor-user-reviews.md` | 決定の根拠をたどるとき |
 | `.claude/agents/ux-model-reviewer.md` | `research/2026-08-timeline-editing-ux.md §3` | 「業界の型」の物差しそのもの |
 | [`adr/0013`](../adr/0013-h264-via-media-foundation.md) | `research/export-encoder-*.md`・`spike-h264-mf-verification.md` | 書き出しコーデックの経緯 |
+| [`adr/0074`](../adr/0074-stario-mv-gamma-design.md) | `research/2026-11-stario-mv-plugin-*.md` | 姉妹ソフト γ の外部プラグイン方式の根拠 |
 
 ⚠️ **自分から棚を漁らない／呼ばれたら開く**——この線引きです。
