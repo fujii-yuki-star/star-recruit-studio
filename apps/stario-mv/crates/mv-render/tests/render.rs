@@ -407,10 +407,12 @@ fn 画像を読む() {
 fn まだ描けないレイヤーは知らせる() {
     let mut p = blank(WorkingColorSpace::Srgb);
     p.compositions[0].layers.push(base_layer(LayerType::Null));
-    assert!(matches!(
-        render(&p, 0),
-        Err(RenderError::NotYetSupported(_))
-    ));
+    match render(&p, 0) {
+        Err(RenderError::NotYetSupported(m)) => {
+            assert!(m.contains("ヌルのレイヤー"), "種類は日本語の名前で: {m}")
+        }
+        r => panic!("{:?}", r.map(|_| ())),
+    }
 }
 
 /// 見本の正解画像（golden）。`UPDATE_GOLDEN=1` で作り直す。
@@ -449,4 +451,62 @@ fn 見本の正解画像と同じ() {
             "{frame} フレーム：正解画像とずれた画素が {off}／{total}"
         );
     }
+}
+
+/// プレビューは描画の核の絵を窓へ写すだけ（MV-0007 決定1）＝色を変えず、比を保って欄に収め、余りは帯。
+#[test]
+fn プレビューへ写すと比を保って帯が付き色は変わらない() {
+    use mv_render::present::{Presenter, Rect};
+    let mut p = blank(WorkingColorSpace::Linear);
+    p.compositions[0].background = [0.2, 0.6, 0.4, 1.0];
+    let id = p.main_composition_id.clone();
+    let mut r = renderer();
+    let img = r.render_texture(&p, &id, 0, Path::new(".")).unwrap();
+    let want = r.render(&p, &id, 0, Path::new(".")).unwrap().pixel(10, 10);
+    let gpu = r.gpu();
+    let fmt = wgpu::TextureFormat::Rgba8Unorm;
+    let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width: 120,
+            height: 120,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: fmt,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let pr = Presenter::new(&gpu.device, fmt);
+    let clear = [0.1, 0.1, 0.1, 1.0];
+    // 欄＝(10,10)〜(110,110)。200×100 の絵は 100×50 になり、上下に 25 ずつ帯
+    pr.draw(
+        &gpu.device,
+        &gpu.queue,
+        &target.create_view(&Default::default()),
+        Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        Some(&img),
+        clear,
+    );
+    let f = mv_render::read_back(gpu, &target, 120, 120).unwrap();
+    assert!(
+        near(f.pixel(60, 60), want, 1),
+        "中央は描画の核と同じ色: {:?} ≠ {want:?}",
+        f.pixel(60, 60)
+    );
+    assert!(near(f.pixel(15, 40), want, 1), "絵の左上の近く");
+    assert!(
+        near(f.pixel(60, 30), [26, 26, 26, 255], 1),
+        "上の帯: {:?}",
+        f.pixel(60, 30)
+    );
+    assert!(near(f.pixel(60, 90), [26, 26, 26, 255], 1), "下の帯");
+    assert!(near(f.pixel(5, 60), [26, 26, 26, 255], 1), "欄の外");
 }
