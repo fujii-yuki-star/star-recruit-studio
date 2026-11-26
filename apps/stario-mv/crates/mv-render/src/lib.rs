@@ -3,11 +3,14 @@
 //! ⚠️ プレビュー・書き出し・外部 AI の「1コマ描く」は**全部これを通す**（近似で書き写さない）。
 //! 流れ＝レイヤーの中身を画素にする（CPU・[`raster`]）→ GPU で下から順に描画モードで混ぜる（[`composite.wgsl`]）。
 
+pub mod media;
 pub mod raster;
 pub mod text;
 
 use mv_core::eval::{invert, is_visible_at, mul, transform_at, Affine, EvalError};
-use mv_core::model::{AssetSource, BlendMode, Composition, LayerType, Project, WorkingColorSpace};
+use mv_core::model::{
+    AssetKind, AssetSource, BlendMode, Composition, LayerType, Project, WorkingColorSpace,
+};
 use raster::Content;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -131,6 +134,10 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     /// 中身の画素の控え（同じ中身を毎コマ作り直さない）。鍵＝中身を決めるものの写し。
     cache: HashMap<String, Content>,
+    /// 映像の素材を読む FFmpeg（映像のレイヤーがあるときだけ要る＝MV-0006 決定4）。
+    ffmpeg: Option<PathBuf>,
+    /// 映像の素材の読み手（素材の場所ごと）。
+    videos: HashMap<PathBuf, media::VideoDecoder>,
 }
 
 impl Renderer {
@@ -220,7 +227,17 @@ impl Renderer {
             final_pipeline,
             sampler,
             cache: HashMap::new(),
+            ffmpeg: None,
+            videos: HashMap::new(),
         }
+    }
+
+    /// 映像の素材を読む FFmpeg の場所を渡す（書き出しと同じ探し方で見つけたもの）。
+    pub fn set_ffmpeg(&mut self, ffmpeg: PathBuf) {
+        if self.ffmpeg.as_ref() != Some(&ffmpeg) {
+            self.videos.clear();
+        }
+        self.ffmpeg = Some(ffmpeg);
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -314,7 +331,7 @@ impl Renderer {
     fn layer_content(
         &mut self,
         project: &Project,
-        _comp: &Composition,
+        comp: &Composition,
         layer: &mv_core::model::Layer,
         frame: i64,
         project_dir: &Path,
@@ -366,21 +383,90 @@ impl Renderer {
                 (format!("text|{doc:?}|{k}"), None)
             }
             LayerType::Image => {
-                let path = asset_path(project, layer, project_dir)?;
-                let key = format!("image|{}", path.display());
+                let (kind, path) = asset_path(project, layer, project_dir)?;
+                let svg = kind == AssetKind::Svg;
+                let key = if svg {
+                    format!("svg|{}|{k}", path.display())
+                } else {
+                    format!("image|{}", path.display())
+                };
                 if self.cache.contains_key(&key) {
                     (key, None)
                 } else {
-                    let bytes = std::fs::read(&path).map_err(|e| RenderError::Asset(format!("素材のファイルを読めませんでした（{}・{e}）。素材を取り込み直してください。", path.display())))?;
-                    let c = raster::image(&bytes)?;
+                    let bytes = read_asset(&path)?;
+                    let c = if svg {
+                        raster::svg(&bytes, k)?
+                    } else {
+                        raster::image(&bytes)?
+                    };
                     (key, Some(c))
                 }
             }
             LayerType::Audio => return Ok(None),
             LayerType::Video => {
-                return Err(RenderError::NotYetSupported(
-                    "映像のレイヤー（γ0.1 の素材の取り込みの段階から）".into(),
-                ))
+                // ⚠️ 映像のコマは控えに入れない（毎コマ変わる＝控えると記憶を食いつぶす）
+                let (kind, path) = asset_path(project, layer, project_dir)?;
+                let t_sec = (frame - layer.start_frame) as f64 * f64::from(comp.fps.den)
+                    / f64::from(comp.fps.num);
+                let content = match kind {
+                    AssetKind::ImageSequence => {
+                        let fps = asset_fps(project, layer).unwrap_or(30.0);
+                        let idx = (t_sec * fps + 1e-6).floor();
+                        let count = project
+                            .assets
+                            .iter()
+                            .find(|a| Some(&a.id) == layer.asset_id.as_ref())
+                            .and_then(|a| a.meta.as_ref())
+                            .and_then(|m| m.frame_count);
+                        if idx < 0.0 || count.is_some_and(|c| idx as u64 >= u64::from(c)) {
+                            return Ok(None);
+                        }
+                        let p = media::sequence_path(&path, idx as u64).ok_or_else(|| {
+                            RenderError::Asset(format!(
+                                "連番の名前の末尾に番号がありません（{}）。",
+                                path.display()
+                            ))
+                        })?;
+                        if count.is_none() && !p.is_file() {
+                            return Ok(None);
+                        }
+                        raster::image(&read_asset(&p)?)?
+                    }
+                    _ => {
+                        let ffmpeg = self.ffmpeg.clone().ok_or_else(|| {
+                            RenderError::Asset(
+                                "映像を読むには FFmpeg が要ります。FFmpeg の場所を設定してください。"
+                                    .into(),
+                            )
+                        })?;
+                        if !self.videos.contains_key(&path) {
+                            let d = media::VideoDecoder::open(&ffmpeg, &path)?;
+                            if d.info.alpha_mode && d.info.alpha_decoder().is_none() {
+                                return Err(RenderError::Asset(format!(
+                                    "この映像の透過（{}）を読めません。",
+                                    d.info.codec
+                                )));
+                            }
+                            self.videos.insert(path.clone(), d);
+                        }
+                        let d = self.videos.get_mut(&path).expect("直前で開いた");
+                        let idx = d.frame_index(t_sec);
+                        let (w, h) = (d.info.width, d.info.height);
+                        match d.frame(idx)? {
+                            Some(px) => raster::rgba(w, h, px),
+                            None => return Ok(None),
+                        }
+                    }
+                };
+                let px_to_local: Affine = [
+                    1.0 / content.px_per_unit,
+                    0.0,
+                    0.0,
+                    1.0 / content.px_per_unit,
+                    content.origin[0],
+                    content.origin[1],
+                ];
+                return Ok(Some((content, mul(t.matrix(), px_to_local))));
             }
             other => {
                 return Err(RenderError::NotYetSupported(format!(
@@ -672,7 +758,7 @@ fn asset_path(
     project: &Project,
     layer: &mv_core::model::Layer,
     project_dir: &Path,
-) -> Result<PathBuf, RenderError> {
+) -> Result<(AssetKind, PathBuf), RenderError> {
     let id = layer
         .asset_id
         .as_deref()
@@ -682,9 +768,28 @@ fn asset_path(
         .iter()
         .find(|a| a.id == id)
         .ok_or_else(|| RenderError::Asset(format!("素材（{id}）が見つかりません。")))?;
-    Ok(match &asset.source {
+    let path = match &asset.source {
         AssetSource::Copied { path } => project_dir.join(path),
         AssetSource::Referenced { absolute_path } => PathBuf::from(absolute_path),
+    };
+    Ok((asset.kind, path))
+}
+
+fn asset_fps(project: &Project, layer: &mv_core::model::Layer) -> Option<f64> {
+    let a = project
+        .assets
+        .iter()
+        .find(|a| Some(&a.id) == layer.asset_id.as_ref())?;
+    let f = a.meta.as_ref()?.fps?;
+    (f.num > 0 && f.den > 0).then(|| f64::from(f.num) / f64::from(f.den))
+}
+
+fn read_asset(path: &Path) -> Result<Vec<u8>, RenderError> {
+    std::fs::read(path).map_err(|e| {
+        RenderError::Asset(format!(
+            "素材のファイルを読めませんでした（{}・{e}）。素材を取り込み直してください。",
+            path.display()
+        ))
     })
 }
 

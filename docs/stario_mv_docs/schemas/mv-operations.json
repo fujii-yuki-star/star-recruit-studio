@@ -55,7 +55,7 @@
         "additionalProperties": false,
         "required": ["kind"],
         "properties": {
-          "kind": { "enum": ["layer", "composition", "marker"] },
+          "kind": { "enum": ["layer", "composition", "marker", "asset"] },
           "count": { "type": "integer", "minimum": 1, "maximum": 100 }
         }
       }
@@ -95,7 +95,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["op", "layer"],
-                "description": "レイヤーを足す。layer には少なくとも name と type と種類ごとの中身（text / shape / solid）を書く。書かなかった項目は既定（有効・コンポジションの全体の長さ・位置は中心・単色のアンカーは中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
+                "description": "レイヤーを足す。layer には少なくとも name と、type と種類ごとの中身（text / shape / solid）か、素材の assetId（type は省ける＝映像・連番→video・画像・SVG→image・音→audio）を書く。書かなかった項目は既定（有効・長さはコンポジションの全体〔映像・連番・音は素材の長さまで〕・位置は中心・アンカーは単色と素材なら中身の中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
                 "properties": {
                   "op": { "const": "addLayer" },
                   "compositionId": { "type": "string", "description": "省略時は mainCompositionId。" },
@@ -174,6 +174,31 @@
                 "properties": {
                   "op": { "const": "updateProject" },
                   "patch": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "path"],
+                "description": "素材を取り込む（画像 png/jpg/jpeg/webp/bmp/tif/tiff・SVG・映像 mp4/mov/m4v/webm/mkv/avi〔透過付きも〕・音 wav/mp3/m4a/aac/flac/ogg/opus・連番画像）。path は利用者が許したフォルダの中のファイル（連番は先頭のファイル＋sequence: true）。mode は copy（既定＝動画のフォルダの assets/ へ写す）か reference（写さずに指す）。幅・高さ・長さ・透過・音などは取り込みのときに調べて記録する。写すのは取引の検査が通ってから。後の addLayer から指すときは id を先に newIds（kind: asset）で発行して渡すか、結果の created を見る。",
+                "properties": {
+                  "op": { "const": "importAsset" },
+                  "path": { "type": "string" },
+                  "mode": { "enum": ["copy", "reference"] },
+                  "id": { "type": "string" },
+                  "name": { "type": "string", "minLength": 1 },
+                  "sequence": { "type": "boolean" },
+                  "fps": { "type": "integer", "minimum": 1, "description": "連番の fps（既定 30）。" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "assetId"],
+                "description": "素材の記録を外す（ファイルは消さない）。その素材を指すレイヤーが残っていると検査で断る。",
+                "properties": {
+                  "op": { "const": "removeAsset" },
+                  "assetId": { "type": "string" }
                 }
               }
             ]

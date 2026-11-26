@@ -41,7 +41,7 @@ ADR-0074 決定3 で、外部 AI（Claude・Codex など）が γ を操作す�
   - レイヤー：`addLayer`／`updateLayer`／`removeLayer`／`moveLayer`
   - コンポジション：`addComposition`／`updateComposition`／`removeComposition`
   - 動画全体：`updateProject`
-  - 素材の取り込みは段階⑥で足す。
+  - 素材：`importAsset`／`removeAsset`（段階⑥で足した＝MV-0006 決定1）。
 - `update*` は **JSON Merge Patch（RFC 7386）**で書く。直したい項目だけを書けば、ほかは変わらない。`null` を書くとその項目を消す。
   - ID は変えられない。
   - コンポジションの `layers` は、レイヤーの操作で変える（`updateComposition` では触れない）。
@@ -93,7 +93,7 @@ ADR-0074 決定3 で、外部 AI（Claude・Codex など）が γ を操作す�
 
 ## 結果・影響
 
-- γ0.1 の目標「AI に素材を並べさせて書き出せる」の、素材以外（単色・図形・文字）が通しでできる。素材は段階⑥から。
+- γ0.1 の目標「AI に素材を並べさせて書き出せる」の、素材以外（単色・図形・文字）が通しでできる。素材は段階⑥から（MV-0006 で足した）。
 - 操作を足すときは、正典の `mv-operations.json` と `mv-ops` の両方を変える。両者の食い違いは検査が落とす（一覧の全部の操作に中身があること）。
 
 ## 未解決の論点

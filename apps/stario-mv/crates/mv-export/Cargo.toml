@@ -11,3 +11,4 @@ mv-render = { path = "../mv-render" }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = "1"

@@ -8,7 +8,7 @@ pub mod args;
 
 use args::{encode_args, probe_encoder_args, AudioInput, EncodeSpec, H264_ENCODERS};
 use mv_core::eval::is_visible_at;
-use mv_core::model::{AssetSource, LayerType, Project};
+use mv_core::model::{AssetKind, AssetSource, LayerType, Project};
 use mv_core::validate::{validate, Issue};
 use mv_render::{RenderError, Renderer};
 use std::io::{Read, Write};
@@ -86,11 +86,12 @@ pub fn locate_ffmpeg(
 }
 
 /// 使える H.264 の道具を上から順に試して選ぶ（一覧に載っていても GPU が無いと動かない道具がある）。
-pub fn pick_encoder(ffmpeg: &Path) -> Result<String, ExportError> {
+/// ⚠️ **書き出す大きさで**試す＝GPU の道具には小さすぎる画面を断るものがある（Intel の道具は 64×36 で開けない）。
+pub fn pick_encoder(ffmpeg: &Path, width: u32, height: u32) -> Result<String, ExportError> {
     let mut failures = Vec::new();
     for enc in H264_ENCODERS {
         let out = Command::new(ffmpeg)
-            .args(probe_encoder_args(enc))
+            .args(probe_encoder_args(enc, width, height))
             .stdin(Stdio::null())
             .output()
             .map_err(|e| ExportError::FfmpegNotFound(e.to_string()))?;
@@ -148,8 +149,10 @@ pub fn export(
         .ok_or_else(|| ExportError::Render(RenderError::CompositionNotFound(comp_id.clone())))?;
     let encoder = match &opts.encoder {
         Some(e) => e.clone(),
-        None => pick_encoder(&opts.ffmpeg)?,
+        None => pick_encoder(&opts.ffmpeg, comp.width, comp.height)?,
     };
+    // 映像のレイヤーも描画の核が FFmpeg で読む（MV-0006 決定4）
+    renderer.set_ffmpeg(opts.ffmpeg.clone());
     let fps = comp.fps.num as f64 / comp.fps.den as f64;
     let audio = audio_inputs(project, comp, project_dir, fps, &opts.ffmpeg)?;
     let total = comp.duration_frames;
@@ -237,7 +240,7 @@ pub fn writing_path(out: &Path) -> PathBuf {
     out.with_file_name(format!(".{name}.writing"))
 }
 
-/// 音のレイヤーを、書き出しに混ぜる音へ。⚠️ 映像のレイヤーの音は素材の取り込み（γ0.1 の段階⑥）から。
+/// 音のレイヤーと、音を持つ映像のレイヤーを、書き出しに混ぜる音へ（MV-0006 決定5）。
 fn audio_inputs(
     project: &Project,
     comp: &mv_core::model::Composition,
@@ -248,7 +251,7 @@ fn audio_inputs(
     let any_solo = comp.layers.iter().any(|l| l.solo == Some(true));
     let mut v = Vec::new();
     for l in &comp.layers {
-        if l.layer_type != LayerType::Audio
+        if !matches!(l.layer_type, LayerType::Audio | LayerType::Video)
             || !l.enabled
             || (any_solo && l.solo != Some(true))
             || l.in_frame >= comp.duration_frames as i64
@@ -275,6 +278,17 @@ fn audio_inputs(
             AssetSource::Copied { path } => project_dir.join(path),
             AssetSource::Referenced { absolute_path } => PathBuf::from(absolute_path),
         };
+        if l.layer_type == LayerType::Video {
+            // 映像のレイヤーは、音を持つときだけ（連番は音を持たない）。調べた値が無ければ調べる
+            let has_audio = match (asset.kind, asset.meta.as_ref().and_then(|m| m.has_audio)) {
+                (AssetKind::ImageSequence, _) => false,
+                (_, Some(h)) => h,
+                (_, None) => probe_has_audio(ffmpeg, &path)?,
+            };
+            if !has_audio {
+                continue;
+            }
+        }
         // 見える範囲を書き出しの範囲（0〜長さ）に切る
         let start = l.in_frame.max(0);
         let end = l.out_frame.min(comp.duration_frames as i64);
@@ -306,6 +320,13 @@ fn audio_inputs(
         });
     }
     Ok(v)
+}
+
+/// 映像の素材が音を持つか（取り込みのときに調べた値が無いとき）。
+fn probe_has_audio(ffmpeg: &Path, path: &Path) -> Result<bool, ExportError> {
+    mv_render::media::probe_av(&mv_render::media::ffprobe_beside(ffmpeg), path)
+        .map(|i| i.audio.is_some())
+        .map_err(ExportError::Render)
 }
 
 /// 素材の音の数を調べる（取り込みのときに調べた値が無いとき）。⚠️ 読めなければ知らせる（推測で混ぜない）。
