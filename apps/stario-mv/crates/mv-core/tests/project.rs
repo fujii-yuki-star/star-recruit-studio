@@ -297,6 +297,19 @@ fn まだ描けない機能は知らせる() {
             "縦書き",
             Box::new(|p| text_layer(p).text.as_mut().unwrap().vertical = Some(true)),
         ),
+        (
+            "文字の縁取り",
+            Box::new(|p| {
+                text_layer(p).text.as_mut().unwrap().stroke = Some(Stroke {
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    width: 2.0,
+                })
+            }),
+        ),
+        (
+            "字の間",
+            Box::new(|p| text_layer(p).text.as_mut().unwrap().letter_spacing = Some(0.1)),
+        ),
     ];
     for (feature, apply) in cases {
         let mut p = minimal();

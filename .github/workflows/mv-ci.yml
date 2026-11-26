@@ -11,6 +11,8 @@ on:
       - "src-tauri/resources/transcribe/**"
       # ⚠️ 芯（mv-core）は γ の資料の schema と見本を埋め込む＝それが変わったときも回す。
       - "docs/stario_mv_docs/**"
+      # ⚠️ 描画の核の検査は α の同梱フォントを参照する（MV-0003 決定5）
+      - "public/fonts/**"
       - ".github/workflows/mv-ci.yml"
   push:
     branches:
@@ -21,6 +23,8 @@ on:
       - "src-tauri/resources/ffmpeg/**"
       - "src-tauri/resources/transcribe/**"
       - "docs/stario_mv_docs/**"
+      # ⚠️ 描画の核の検査は α の同梱フォントを参照する（MV-0003 決定5）
+      - "public/fonts/**"
       - ".github/workflows/mv-ci.yml"
 
 permissions:

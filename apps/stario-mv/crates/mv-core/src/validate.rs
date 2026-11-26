@@ -44,6 +44,8 @@ const NOT_YET: &[(&str, &str)] = &[
     ("2.5D（奥行き・カメラ）", "γ0.2"),
     ("つなぎ", "γ0.3"),
     ("縦書き", "γ0.4"),
+    ("文字の縁取り", "γ0.4"),
+    ("字の間", "γ0.4"),
     ("エフェクト", "γ0.5"),
     ("調整レイヤー", "γ0.5"),
     ("マスク", "γ0.6"),
@@ -320,12 +322,29 @@ impl Checker {
                 not_yet("マスク"),
             );
         }
-        if l.text.as_ref().and_then(|t| t.vertical) == Some(true) {
-            self.push(
-                IssueCode::NotYetSupported,
-                format!("{lpath}/text/vertical"),
-                not_yet("縦書き"),
-            );
+        if let Some(t) = &l.text {
+            if t.vertical == Some(true) {
+                self.push(
+                    IssueCode::NotYetSupported,
+                    format!("{lpath}/text/vertical"),
+                    not_yet("縦書き"),
+                );
+            }
+            // ⚠️ 描画の核はまだ描けない＝黙って無視しないために知らせる（MV-0003 決定5）
+            if t.stroke.is_some() {
+                self.push(
+                    IssueCode::NotYetSupported,
+                    format!("{lpath}/text/stroke"),
+                    not_yet("文字の縁取り"),
+                );
+            }
+            if t.letter_spacing.is_some_and(|s| s != 0.0) {
+                self.push(
+                    IssueCode::NotYetSupported,
+                    format!("{lpath}/text/letterSpacing"),
+                    not_yet("字の間"),
+                );
+            }
         }
 
         // 値の形

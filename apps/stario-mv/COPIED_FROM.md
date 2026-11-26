@@ -12,3 +12,4 @@
 | γ の設定 | 指している先（α） |
 |---|---|
 | `src-tauri/tauri.conf.json` の `bundle.resources` | `src-tauri/resources/ffmpeg`・`src-tauri/resources/transcribe`（VOICEVOX と同梱 AI は指さない＝ADR-0074 決定1） |
+| `crates/mv-render` の検査（文字） | `public/fonts`（Gen Interface JP など・SIL OFL 1.1＝MV-0003 決定5） |
