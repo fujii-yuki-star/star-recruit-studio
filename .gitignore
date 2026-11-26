@@ -47,3 +47,7 @@ tutorial-out/
 /src-tauri/pruned_resources/
 # 配布用に揃えたフォルダと zip（scripts/package-release.mjs・大容量）
 /release/
+
+# 姉妹ソフト すたりおMV（γ・ADR-0075）のビルド成果物（node_modules と dist は上の行で無視される）
+/apps/*/src-tauri/target/
+/apps/*/src-tauri/target-check/
