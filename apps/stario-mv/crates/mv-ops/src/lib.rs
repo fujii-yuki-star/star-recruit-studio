@@ -4,6 +4,7 @@
 //! 操作の一覧の正典は `docs/stario_mv_docs/schemas/mv-operations.json`（[`CATALOG_JSON`]）。
 //! ⚠️ 書き換えは必ず取引（[`tx`]）で＝当てたあとに形と中身の検査を通ったときだけ保存する（ADR-0074 決定3）。
 
+pub mod import;
 pub mod mcp;
 pub mod settings;
 pub mod tx;
@@ -291,7 +292,12 @@ impl Ops {
             let refs: Vec<&Path> = dirs.iter().map(PathBuf::as_path).collect();
             let fonts = Fonts::load(&refs).map_err(|e| OpError::new("render", e.to_string()))?;
             let gpu = Gpu::new().map_err(|e| OpError::new("render", e.to_string()))?;
-            self.renderer = Some(Renderer::new(gpu, fonts));
+            let mut r = Renderer::new(gpu, fonts);
+            // 映像のレイヤーを読む FFmpeg（見つからなくても描ける物は描く＝映像を描くときに知らせる）
+            if let Ok(f) = mv_export::locate_ffmpeg(self.settings.ffmpeg.as_deref(), &[]) {
+                r.set_ffmpeg(f);
+            }
+            self.renderer = Some(r);
         }
         Ok(self.renderer.as_mut().expect("直前で用意した"))
     }
@@ -381,7 +387,34 @@ impl Ops {
                 ));
             }
         }
-        let ops = args["ops"].as_array().cloned().unwrap_or_default();
+        let mut ops = args["ops"].as_array().cloned().unwrap_or_default();
+        // 取り込みの下ごしらえ（調べるだけ・写すのは検査が通ってから＝MV-0006 決定1）
+        let mut copies: Vec<(PathBuf, String)> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
+        let mut planned_sources: Vec<(String, PathBuf)> = Vec::new();
+        for (i, op) in ops.iter_mut().enumerate() {
+            if op["op"] != "importAsset" {
+                continue;
+            }
+            let fail = |m: String| {
+                OpError::new(
+                    "opFailed",
+                    format!("{i} 番目の操作（importAsset）を当てられませんでした。何も変えていません：{m}"),
+                )
+            };
+            let src = PathBuf::from(op["path"].as_str().unwrap_or_default());
+            if !self.settings.is_allowed(&src, &[]) {
+                return Err(fail(not_allowed(&src).message));
+            }
+            let ffprobe = mv_export::locate_ffmpeg(self.settings.ffmpeg.as_deref(), &[])
+                .ok()
+                .map(|f| mv_render::media::ffprobe_beside(&f));
+            let plan = import::plan(op, ffprobe.as_deref()).map_err(fail)?;
+            planned_sources.push((plan.asset["id"].as_str().unwrap_or_default().into(), src));
+            copies.extend(plan.copies);
+            warnings.extend(plan.warnings);
+            op[tx::RESOLVED_ASSET] = plan.asset;
+        }
         let mut after = before.clone();
         let created = tx::apply_ops(&mut after, &ops).map_err(|f| {
             let name = ops[f.index]["op"].as_str().unwrap_or("?").to_string();
@@ -408,6 +441,7 @@ impl Ops {
             "created": created,
             "changes": tx::diff(&before, &after),
             "issues": issues,
+            "warnings": warnings,
         });
         let ok = issues.is_empty();
         if !ok {
@@ -417,15 +451,30 @@ impl Ops {
         }
         let project = project.filter(|_| ok);
         if let (Some(p), false) = (&project, dry) {
-            mv_core::io::save_project(&dir, p)
-                .map_err(|e| OpError::new("io", format!("保存できませんでした（{e}）。")))?;
+            // 写してから保存する。どちらかで失敗したら、写したものを消して戻す（何も残さない）
+            let made = import::copy_all(&dir, &copies).map_err(|e| OpError::new("io", e))?;
+            if let Err(e) = mv_core::io::save_project(&dir, p) {
+                import::remove_all(&made);
+                return Err(OpError::new("io", format!("保存できませんでした（{e}）。")));
+            }
             out["applied"] = json!(true);
             out["revision"] = json!(read_doc(&dir)?.1);
         }
         let mut image = None;
         if let (Some(r), Some(p)) = (args.get("render"), &project) {
+            // 試しのときは、まだ写していない素材を元の場所から読む
+            let mut p = p.clone();
+            if dry {
+                for a in &mut p.assets {
+                    if let Some((_, src)) = planned_sources.iter().find(|(id, _)| *id == a.id) {
+                        a.source = mv_core::model::AssetSource::Referenced {
+                            absolute_path: src.display().to_string(),
+                        };
+                    }
+                }
+            }
             let (comp_id, png) = self.render_png(
-                p,
+                &p,
                 &dir,
                 r.get("compositionId").and_then(Value::as_str),
                 r["frame"].as_i64().unwrap_or(0),
@@ -530,6 +579,7 @@ fn new_ids(args: &Value) -> Result<Output, OpError> {
     let kind = match args["kind"].as_str() {
         Some("layer") => IdKind::Layer,
         Some("composition") => IdKind::Composition,
+        Some("asset") => IdKind::Asset,
         _ => IdKind::Marker,
     };
     let n = args.get("count").and_then(Value::as_u64).unwrap_or(1);

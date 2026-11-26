@@ -24,7 +24,13 @@ pub const TX_OPS: &[&str] = &[
     "updateComposition",
     "removeComposition",
     "updateProject",
+    "importAsset",
+    "removeAsset",
 ];
+
+/// 取り込みの下ごしらえ（[`crate::import`]）が `importAsset` に書き足す、素材の記録の鍵。
+/// ⚠️ ここ（純粋）ではファイルを調べない・写さない＝調べた結果だけを受け取る。
+pub const RESOLVED_ASSET: &str = "$asset";
 
 /// 新しく発行した ID（何番目の操作が、何を作ったか）。
 #[derive(Debug, Clone, PartialEq)]
@@ -54,8 +60,18 @@ pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailu
                     ));
                 };
                 let mut layer = src.clone();
+                let asset = layer
+                    .get("assetId")
+                    .and_then(Value::as_str)
+                    .and_then(|aid| {
+                        doc["assets"]
+                            .as_array()?
+                            .iter()
+                            .find(|a| a["id"].as_str() == Some(aid))
+                            .cloned()
+                    });
                 let comp = &doc["compositions"][ci];
-                fill_layer_defaults(&mut layer, comp);
+                fill_layer_defaults(&mut layer, comp, asset.as_ref());
                 let id = layer["id"].as_str().unwrap_or_default().to_string();
                 let layers = comp_layers_mut(doc, ci);
                 let at = op
@@ -159,6 +175,32 @@ pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailu
                 }
                 merge_patch(doc, &patch);
             }
+            "importAsset" => {
+                let Some(Value::Object(a)) = op.get(RESOLVED_ASSET) else {
+                    return Err(fail(
+                        "素材を調べられていません（すたりおMV の不具合）。".into(),
+                    ));
+                };
+                let id = a["id"].as_str().unwrap_or_default().to_string();
+                assets_mut(doc).push(Value::Object(a.clone()));
+                created.push(Created {
+                    index,
+                    kind: "asset",
+                    id,
+                });
+            }
+            "removeAsset" => {
+                let id = str_arg(op, "assetId");
+                let i = doc["assets"]
+                    .as_array()
+                    .and_then(|v| v.iter().position(|a| a["id"].as_str() == Some(id)))
+                    .ok_or_else(|| {
+                        fail(format!(
+                            "素材 {id} が見つかりません。inspect で ID を確かめてください。"
+                        ))
+                    })?;
+                assets_mut(doc).remove(i);
+            }
             other => {
                 return Err(fail(format!(
                     "「{other}」という編集はありません（使えるのは {}）。",
@@ -190,10 +232,42 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
 }
 
 /// 新しいレイヤーに、書かれなかった項目の既定を入れる（AE が新しいレイヤーに入れる値に合わせる＝MV-0005 決定2）。
-pub fn fill_layer_defaults(layer: &mut Map<String, Value>, comp: &Value) {
+/// 素材を指すレイヤー（`asset`）は、種類を素材から決め、アンカーを素材の中心・長さを素材の長さにする（MV-0006 決定3）。
+pub fn fill_layer_defaults(layer: &mut Map<String, Value>, comp: &Value, asset: Option<&Value>) {
     let w = comp["width"].as_f64().unwrap_or(0.0);
     let h = comp["height"].as_f64().unwrap_or(0.0);
-    let dur = comp["durationFrames"].as_i64().unwrap_or(0);
+    let mut dur = comp["durationFrames"].as_i64().unwrap_or(0);
+    let mut asset_center = None;
+    if let Some(a) = asset {
+        let kind = a["kind"].as_str().unwrap_or_default();
+        let ty = match kind {
+            "video" | "imageSequence" => "video",
+            "audio" => "audio",
+            _ => "image",
+        };
+        layer.entry("type").or_insert(json!(ty));
+        let m = &a["meta"];
+        if let (Some(aw), Some(ah)) = (m["width"].as_f64(), m["height"].as_f64()) {
+            asset_center = Some([aw / 2.0, ah / 2.0]);
+        }
+        // 素材の長さ（秒）→ コンポジションのコマ数（コンポジションより長ければそこまで）
+        let comp_fps =
+            comp["fps"]["num"].as_f64().unwrap_or(0.0) / comp["fps"]["den"].as_f64().unwrap_or(1.0);
+        let fps_of =
+            |f: &Value| f["num"].as_f64().unwrap_or(0.0) / f["den"].as_f64().unwrap_or(1.0);
+        let secs = match kind {
+            "imageSequence" => m["frameCount"]
+                .as_f64()
+                .zip(Some(fps_of(&m["fps"])).filter(|f| *f > 0.0))
+                .map(|(n, f)| n / f),
+            "video" | "audio" => m["durationSec"].as_f64(),
+            _ => None,
+        };
+        if let Some(secs) = secs {
+            let frames = (secs * comp_fps - 1e-6).ceil().max(1.0) as i64;
+            dur = dur.min(frames);
+        }
+    }
     layer
         .entry("id")
         .or_insert_with(|| json!(new_id(IdKind::Layer)));
@@ -227,7 +301,7 @@ pub fn fill_layer_defaults(layer: &mut Map<String, Value>, comp: &Value) {
                 s["height"].as_f64().unwrap_or(h) / 2.0,
             ]
         }
-        _ => [0.0, 0.0],
+        _ => asset_center.unwrap_or([0.0, 0.0]),
     };
     let t = layer
         .entry("transform")
@@ -280,8 +354,17 @@ pub fn diff(before: &Value, after: &Value) -> Value {
     let project_changed = ["name", "settings", "mainCompositionId"]
         .iter()
         .any(|k| before[k] != after[k]);
+    let assets = |d: &Value| -> BTreeMap<String, Value> {
+        d["assets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|a| (a["id"].as_str().unwrap_or_default().to_string(), a.clone()))
+            .collect()
+    };
     json!({
         "project": project_changed,
+        "assets": id_diff(&assets(before), &assets(after)),
         "compositions": id_diff(&comps(before), &comps(after)),
         "layers": id_diff(&layers(before), &layers(after)),
     })
@@ -344,6 +427,13 @@ fn find_layer(doc: &Value, id: &str) -> Option<(usize, usize)> {
     None
 }
 
+fn assets_mut(doc: &mut Value) -> &mut Vec<Value> {
+    if !doc["assets"].is_array() {
+        doc["assets"] = json!([]);
+    }
+    doc["assets"].as_array_mut().expect("直前で配列にした")
+}
+
 fn compositions_mut(doc: &mut Value) -> &mut Vec<Value> {
     if !doc["compositions"].is_array() {
         doc["compositions"] = json!([]);
@@ -388,7 +478,7 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        fill_layer_defaults(&mut l, &comp);
+        fill_layer_defaults(&mut l, &comp, None);
         assert_eq!(l["locked"], json!(true), "書いた値は残す");
         assert_eq!(l["enabled"], json!(true));
         assert_eq!(l["outFrame"], json!(60));
@@ -406,7 +496,49 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        fill_layer_defaults(&mut t, &comp);
+        fill_layer_defaults(&mut t, &comp, None);
+        assert_eq!(t["transform"]["anchor"], json!({"value": [0.0, 0.0]}));
+        // 素材を指すレイヤー＝種類は素材から・アンカーは素材の中心・長さは素材の長さ
+        let comp = json!({"width": 1280, "height": 720, "durationFrames": 300, "fps": {"num": 30, "den": 1}});
+        let video = json!({"id": "ast_X", "kind": "video", "meta": {"width": 640, "height": 360, "durationSec": 2.5}});
+        let mut v = json!({"name": "v", "assetId": "ast_X"})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut v, &comp, Some(&video));
+        assert_eq!(v["type"], "video");
+        assert_eq!(v["outFrame"], json!(75));
+        assert_eq!(v["transform"]["anchor"], json!({"value": [320.0, 180.0]}));
+        let seq = json!({"id": "ast_S", "kind": "imageSequence", "meta": {"width": 10, "height": 10, "frameCount": 48, "fps": {"num": 24, "den": 1}}});
+        let mut q = json!({"name": "q", "assetId": "ast_S"})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut q, &comp, Some(&seq));
+        assert_eq!(
+            q["outFrame"],
+            json!(60),
+            "48 コマ÷24fps＝2 秒＝30fps で 60 コマ"
+        );
+        let long = json!({"id": "ast_A", "kind": "audio", "meta": {"durationSec": 600.0}});
+        let mut a = json!({"name": "a", "assetId": "ast_A"})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut a, &comp, Some(&long));
+        assert_eq!(a["type"], "audio");
+        assert_eq!(
+            a["outFrame"],
+            json!(300),
+            "コンポジションより長ければそこまで"
+        );
+        let img = json!({"id": "ast_I", "kind": "svg", "meta": {"width": 100, "height": 50}});
+        let mut i = json!({"name": "i", "assetId": "ast_I", "type": "image"})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut i, &comp, Some(&img));
+        assert_eq!(i["outFrame"], json!(300), "画像はコンポジションの全体");
         assert_eq!(t["transform"]["anchor"], json!({"value": [0.0, 0.0]}));
     }
 }

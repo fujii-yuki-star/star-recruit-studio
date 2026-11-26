@@ -342,3 +342,69 @@ fn コマンドから書き出せる() {
     assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// コマンドは別の工程＝描画の核に FFmpeg を渡すのは export 自身（MV-0006 決定4）。映像のレイヤーで確かめる。
+#[test]
+fn コマンドで映像のレイヤーも書き出せる() {
+    let dir = tmpdir();
+    let proj = dir.join("proj");
+    let assets = proj.join("assets/v");
+    std::fs::create_dir_all(&assets).unwrap();
+    let st = Command::new(ffmpeg())
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=64x64:r=30:d=3",
+            "-c:v",
+            "png",
+        ])
+        .arg(assets.join("c.mov"))
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let mut doc: serde_json::Value = serde_json::from_str(MINIMAL).unwrap();
+    doc["assets"] = serde_json::json!([{ "id": "ast_01JDQ0000000000000000000V9", "kind": "video", "name": "赤",
+        "source": { "mode": "copied", "path": "assets/v/c.mov" } }]);
+    let mut layer = doc["compositions"][0]["layers"][1].clone();
+    layer.as_object_mut().unwrap().remove("solid");
+    layer["type"] = "video".into();
+    layer["assetId"] = "ast_01JDQ0000000000000000000V9".into();
+    layer["transform"]["anchor"] = serde_json::json!({ "value": [32, 32] });
+    doc["compositions"][0]["layers"] = serde_json::json!([layer]);
+    save_project(&proj, &parse_project(&doc.to_string()).unwrap()).unwrap();
+    let out = dir.join("video.mp4");
+    let o = Command::new(env!("CARGO_BIN_EXE_stario-mv-export"))
+        .arg(&proj)
+        .arg("--out")
+        .arg(&out)
+        .arg("--fonts")
+        .arg(repo().join("public/fonts"))
+        .arg("--ffmpeg")
+        .arg(ffmpeg())
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let png = dir.join("f.png");
+    let st = Command::new(ffmpeg())
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(&out)
+        .args(["-frames:v", "1"])
+        .arg(&png)
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let img = image::open(&png).unwrap().to_rgba8();
+    let c = img.get_pixel(960, 540).0;
+    assert!(
+        c[0] > 230 && c[1] < 25 && c[2] < 25,
+        "中央に映像の赤: {c:?}"
+    );
+    let c = img.get_pixel(100, 100).0;
+    assert!(c[0] < 25, "映像の外は背景: {c:?}");
+    std::fs::remove_dir_all(&dir).ok();
+}

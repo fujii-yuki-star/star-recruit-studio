@@ -132,22 +132,13 @@ pub fn encode_args(s: &EncodeSpec) -> Vec<String> {
     a
 }
 
-/// その道具が本当に使えるか確かめる引数（小さな1コマを捨て先へ）。
-pub fn probe_encoder_args(encoder: &str) -> Vec<String> {
-    let mut a: Vec<String> = [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=black:s=256x256:d=0.1:r=30",
-        "-frames:v",
-        "2",
-        "-c:v",
-    ]
-    .map(String::from)
-    .to_vec();
+/// その道具が本当に使えるか確かめる引数（書き出す大きさの2コマを捨て先へ）。
+pub fn probe_encoder_args(encoder: &str, width: u32, height: u32) -> Vec<String> {
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"]
+        .map(String::from)
+        .to_vec();
+    a.push(format!("color=c=black:s={width}x{height}:d=0.1:r=30"));
+    a.extend(["-frames:v", "2", "-c:v"].map(String::from));
     a.push(encoder.into());
     a.extend(["-pix_fmt", "yuv420p", "-f", "null", "-"].map(String::from));
     a

@@ -207,27 +207,66 @@ pub fn image(bytes: &[u8]) -> Result<Content, RenderError> {
         .map_err(|e| RenderError::Asset(format!("画像を読めませんでした（{e}）。")))?
         .to_rgba8();
     let (w, h) = img.dimensions();
+    Ok(rgba(w, h, img.as_raw()))
+}
+
+/// 乗算していない RGBA8 の画素（画像・映像のコマ・連番）→ 中身（左上が (0,0)）。
+pub fn rgba(w: u32, h: u32, src: &[u8]) -> Content {
     let pw = w + 2 * PAD;
     let ph = h + 2 * PAD;
     let mut data = vec![0u8; (pw * ph * 4) as usize];
     for y in 0..h {
-        for x in 0..w {
-            let p = img.get_pixel(x, y).0;
+        let row = &src[(y * w * 4) as usize..((y + 1) * w * 4) as usize];
+        let dst0 = (((y + PAD) * pw + PAD) * 4) as usize;
+        for (x, p) in row.chunks_exact(4).enumerate() {
             let a = p[3] as u32;
-            let i = (((y + PAD) * pw + x + PAD) * 4) as usize;
+            let i = dst0 + x * 4;
             data[i] = ((p[0] as u32 * a + 127) / 255) as u8;
             data[i + 1] = ((p[1] as u32 * a + 127) / 255) as u8;
             data[i + 2] = ((p[2] as u32 * a + 127) / 255) as u8;
             data[i + 3] = p[3];
         }
     }
-    Ok(Content {
+    Content {
         width: pw,
         height: ph,
         data,
         origin: [-(PAD as f64), -(PAD as f64)],
         px_per_unit: 1.0,
-    })
+    }
+}
+
+/// SVG の書かれた大きさ（幅・高さ）。
+pub fn svg_size(bytes: &[u8]) -> Result<(f64, f64), RenderError> {
+    let tree = svg_tree(bytes)?;
+    let s = tree.size();
+    Ok((f64::from(s.width()), f64::from(s.height())))
+}
+
+fn svg_tree(bytes: &[u8]) -> Result<resvg::usvg::Tree, RenderError> {
+    // ⚠️ SVG の中の文字は、フォントを渡していないので描けない＝黙って消さずに知らせる
+    if String::from_utf8_lossy(bytes).contains("<text") {
+        return Err(RenderError::NotYetSupported(
+            "SVG の中の文字（文字をパスに変換してから取り込んでください）".into(),
+        ));
+    }
+    resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
+        .map_err(|e| RenderError::Asset(format!("SVG を読めませんでした（{e}）。")))
+}
+
+/// SVG（左上が (0,0)・拡大されても粗くならないよう k 倍で描く）。
+pub fn svg(bytes: &[u8], k: f64) -> Result<Content, RenderError> {
+    let tree = svg_tree(bytes)?;
+    let s = tree.size();
+    let pw = (f64::from(s.width()) * k).ceil() as u32 + 2 * PAD;
+    let ph = (f64::from(s.height()) * k).ceil() as u32 + 2 * PAD;
+    let mut pm = pixmap(pw, ph)?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_row(k as f32, 0.0, 0.0, k as f32, PAD as f32, PAD as f32),
+        &mut pm.as_mut(),
+    );
+    Ok(content_from(pm, [-(PAD as f64) / k, -(PAD as f64) / k], k))
 }
 
 /// 文字（1行目のベースラインの揃えの点が (0,0)）。
