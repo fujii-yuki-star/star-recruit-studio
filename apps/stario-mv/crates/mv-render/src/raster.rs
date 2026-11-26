@@ -218,7 +218,7 @@ pub fn rgba(w: u32, h: u32, src: &[u8]) -> Content {
     for y in 0..h {
         let row = &src[(y * w * 4) as usize..((y + 1) * w * 4) as usize];
         let dst0 = (((y + PAD) * pw + PAD) * 4) as usize;
-        for (x, p) in row.chunks_exact(4).enumerate() {
+        for (x, p) in row.as_chunks::<4>().0.iter().enumerate() {
             let a = p[3] as u32;
             let i = dst0 + x * 4;
             data[i] = ((p[0] as u32 * a + 127) / 255) as u8;
