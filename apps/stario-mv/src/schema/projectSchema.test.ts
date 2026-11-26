@@ -36,7 +36,7 @@ describe("MV-0001 project.json の形", () => {
     ["映像のレイヤーが素材を指さない", (d) => { const l = solidLayer(d); l.type = "video"; delete l.solid; }],
     ["単色でないレイヤーが単色の中身を持つ", (d) => { solidLayer(d).type = "adjustment"; }],
     ["色が 0〜1 の外", (d) => { firstComp(d).background = [0, 0, 0, 2]; }],
-    ["エフェクトの種類の名前が決まりの外", (d) => { ((solidLayer(d).effects as Json[])[0]).type = "blur"; }],
+    ["エフェクトの種類の名前が決まりの外", (d) => { solidLayer(d).effects = [{ id: "fx_01JDQ0000000000000000000F1", type: "blur", version: 1, enabled: true, params: {} }]; }],
     ["つなぎに知らない項目", (d) => { ((solidLayer(d).transform as Json).opacity as Json).links = [{ kind: "audio", amount: 1, gain: 2 }]; }],
     ["キーフレームの進み方が決まりの外", (d) => { (((textLayer(d).transform as Json).opacity as Json).keyframes as Json[])[0].interpolation = "ease"; }],
     ["fps が分数でない", (d) => { firstComp(d).fps = 30; }],

@@ -49,5 +49,7 @@ tutorial-out/
 /release/
 
 # 姉妹ソフト すたりおMV（γ・ADR-0075）のビルド成果物（node_modules と dist は上の行で無視される）
+/apps/*/target/
+/apps/*/target-check/
 /apps/*/src-tauri/target/
 /apps/*/src-tauri/target-check/
