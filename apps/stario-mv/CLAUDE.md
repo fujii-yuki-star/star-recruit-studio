@@ -28,7 +28,7 @@
 ## 3. 置き方と共有（ADR-0075）
 
 - γ のものは全部 `apps/stario-mv/` の中（独自の package.json・lock・vite・tsconfig・src-tauri）。開発サーバは **1430 番**（α は 1420）。
-- Rust は `apps/stario-mv/Cargo.toml` を根にしたワークスペース。**芯は `crates/mv-core`**（プロジェクトの形・検査・読み書き・時刻の値＝画面にも Tauri にも依存しない＝MV-0001 追補）。**描画の核は `crates/mv-render`**（プレビュー・書き出し・外部 AI の「1コマ描く」が全部これを通す＝MV-0002・MV-0003）。
+- Rust は `apps/stario-mv/Cargo.toml` を根にしたワークスペース。**芯は `crates/mv-core`**（プロジェクトの形・検査・読み書き・時刻の値＝画面にも Tauri にも依存しない＝MV-0001 追補）。**描画の核は `crates/mv-render`**（プレビュー・書き出し・外部 AI の「1コマ描く」が全部これを通す＝MV-0002・MV-0003）。**書き出しは `crates/mv-export`**（コマンド `stario-mv-export`＝MV-0004）。
 - α の部品を写したら [`COPIED_FROM.md`](COPIED_FROM.md) に1行足す。参照（同梱の ffmpeg・transcribe）もそこに書く。
 - ⚠️ ルートの α の門番テスト・CI は γ を見ない。γ の検査は γ の中で回す：
   - `npm run check:frontend`（lint→typecheck→test→build）

@@ -2,4 +2,4 @@
 # ⚠️ 芯（mv-core）は画面にも Tauri にも依存しない＝アプリ・画面なしの書き出し・外部 AI の口で同じものを使う。
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/mv-core", "crates/mv-render"]
+members = ["src-tauri", "crates/mv-core", "crates/mv-render", "crates/mv-export"]

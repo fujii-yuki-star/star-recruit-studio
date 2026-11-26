@@ -2436,6 +2436,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mv-export"
+version = "0.0.1"
+dependencies = [
+ "image",
+ "mv-core",
+ "mv-render",
+]
+
+[[package]]
 name = "mv-render"
 version = "0.0.1"
 dependencies = [
