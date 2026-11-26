@@ -2445,6 +2445,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mv-ops"
+version = "0.0.1"
+dependencies = [
+ "base64 0.22.1",
+ "image",
+ "jsonschema",
+ "mv-core",
+ "mv-export",
+ "mv-render",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "mv-render"
 version = "0.0.1"
 dependencies = [

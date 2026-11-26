@@ -1,0 +1,20 @@
+[package]
+name = "mv-ops"
+version = "0.0.1"
+description = "すたりおMV の外部 AI の操作口（操作の一覧・取引・MCP とコマンド＝MV-0005）。"
+edition = "2021"
+publish = false
+
+[dependencies]
+mv-core = { path = "../mv-core" }
+mv-render = { path = "../mv-render" }
+mv-export = { path = "../mv-export" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonschema = { version = "0.33", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,233 @@
+{
+  "$comment": "すたりおMV の外部 AI の操作の一覧（正典＝MV-0005 決定2）。MCP の tools/list はこれをそのまま返し、呼ばれた引数もまずこの inputSchema で確かめる。操作を足すときは crates/mv-ops も同時に変える（片方だけだと検査が落ちる）。",
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "inspect",
+      "title": "中身を見る",
+      "description": "動画（すたりおMV のプロジェクト）の中身を見る。既定は要約（版＝revision・コンポジションとレイヤーの一覧・検査の問題の数）。compositionId か layerId を渡すと、その JSON 全体を返す。full: true でプロジェクトの JSON 全体。編集の前に呼び、返った revision を applyTransaction の baseRevision に入れると、その間の他の変更と衝突しない。レイヤーの並びは先頭が最前面。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project": { "type": "string", "description": "動画のフォルダ（project.json があるフォルダ）。MCP を --project 付きで起動したときは省略できる。" },
+          "compositionId": { "type": "string" },
+          "layerId": { "type": "string" },
+          "full": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "validate",
+      "title": "検査する",
+      "description": "動画を検査する（1段目＝形〔JSON Schema〕・2段目＝中身〔ID の重複・参照先・時間・キーフレームの順・この版でまだ描けない機能〕）。問題ごとに場所（JSON Pointer）と直し方を返す。問題が無ければ書き出せる。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "renderFrame",
+      "title": "1コマ描く",
+      "description": "ある時刻の1コマを、書き出しと同じ描画で描いて PNG で返す（結果を目で確かめるため）。frame はコンポジションのコマ番号（0 から）。maxSize は長辺の上限（既定 960・0 で縮めない）。out を渡すとそこへ保存する（動画のフォルダの cache/ か、利用者が許したフォルダの中だけ）。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["frame"],
+        "properties": {
+          "project": { "type": "string" },
+          "compositionId": { "type": "string", "description": "省略時は mainCompositionId。" },
+          "frame": { "type": "integer", "minimum": 0 },
+          "maxSize": { "type": "integer", "minimum": 0 },
+          "out": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "newIds",
+      "title": "ID を発行する",
+      "description": "新しい ID を発行する。取引の中で、後の操作から新しいレイヤー等を指したいときに、先に発行して addLayer の id に入れる（省略すれば addLayer が自分で発行し、結果の created に返す）。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "enum": ["layer", "composition", "marker"] },
+          "count": { "type": "integer", "minimum": 1, "maximum": 100 }
+        }
+      }
+    },
+    {
+      "name": "applyTransaction",
+      "title": "まとめて反映する",
+      "description": "一連の編集（ops）を1つの取引として、動画の写しに順に当て、形と中身の検査を通ったときだけ保存する。1つでも当てられない・検査に問題が残るなら何も変えずに、どの操作か・どこを直すかを返す。dryRun: true なら試すだけ（差分と検査の結果を返す）。render を渡すと反映後の1コマの絵も返す。update 系の patch は JSON Merge Patch（書いた項目だけ変わる・null はその項目を消す・ID とコンポジションの layers は変えられない）。値の形（固定値は {\"value\": …}・キーフレームは {\"keyframes\": [{\"frame\", \"value\", \"interpolation\"}]}）はプロジェクトの正典 schema（mv-project.schema.json）のとおり。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ops"],
+        "properties": {
+          "project": { "type": "string" },
+          "baseRevision": { "type": "string", "description": "inspect が返した revision。渡すと、その間に変わっていたら反映を断る。" },
+          "dryRun": { "type": "boolean" },
+          "render": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["frame"],
+            "properties": {
+              "compositionId": { "type": "string" },
+              "frame": { "type": "integer", "minimum": 0 },
+              "maxSize": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "ops": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/op" }
+          }
+        },
+        "$defs": {
+          "op": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layer"],
+                "description": "レイヤーを足す。layer には少なくとも name と type と種類ごとの中身（text / shape / solid）を書く。書かなかった項目は既定（有効・コンポジションの全体の長さ・位置は中心・単色のアンカーは中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
+                "properties": {
+                  "op": { "const": "addLayer" },
+                  "compositionId": { "type": "string", "description": "省略時は mainCompositionId。" },
+                  "index": { "type": "integer", "minimum": 0 },
+                  "layer": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layerId", "patch"],
+                "description": "レイヤーを直す（JSON Merge Patch）。",
+                "properties": {
+                  "op": { "const": "updateLayer" },
+                  "layerId": { "type": "string" },
+                  "patch": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layerId"],
+                "description": "レイヤーを外す。",
+                "properties": {
+                  "op": { "const": "removeLayer" },
+                  "layerId": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layerId", "index"],
+                "description": "レイヤーの重なりの順を変える（同じコンポジションの中・0＝最前面）。",
+                "properties": {
+                  "op": { "const": "moveLayer" },
+                  "layerId": { "type": "string" },
+                  "index": { "type": "integer", "minimum": 0 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "composition"],
+                "description": "コンポジションを足す。composition には name・width・height・fps（{num, den}）・durationFrames を書く（background は既定で黒・layers と markers は空）。",
+                "properties": {
+                  "op": { "const": "addComposition" },
+                  "composition": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "compositionId", "patch"],
+                "description": "コンポジションを直す（JSON Merge Patch・layers は変えられない）。",
+                "properties": {
+                  "op": { "const": "updateComposition" },
+                  "compositionId": { "type": "string" },
+                  "patch": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "compositionId"],
+                "description": "コンポジションを外す（書き出しの既定のコンポジションは外せない）。",
+                "properties": {
+                  "op": { "const": "removeComposition" },
+                  "compositionId": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "patch"],
+                "description": "動画全体を直す（JSON Merge Patch・name・settings・mainCompositionId だけ）。",
+                "properties": {
+                  "op": { "const": "updateProject" },
+                  "patch": { "type": "object" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "createProject",
+      "title": "新しい動画を作る",
+      "description": "新しい動画のフォルダを作る（コンポジション1つ・レイヤーなし）。dir は無いか空のフォルダで、利用者が許したフォルダの中だけ。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dir", "name", "width", "height", "fps", "durationFrames"],
+        "properties": {
+          "dir": { "type": "string" },
+          "name": { "type": "string", "minLength": 1 },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 },
+          "fps": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["num", "den"],
+            "properties": {
+              "num": { "type": "integer", "minimum": 1 },
+              "den": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "durationFrames": { "type": "integer", "minimum": 1 },
+          "background": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "workingColorSpace": { "enum": ["linear", "srgb"] }
+        }
+      }
+    },
+    {
+      "name": "exportVideo",
+      "title": "書き出す",
+      "description": "MP4（H.264・BT.709・音は AAC）に書き出す。out は利用者が許したフォルダの中だけ。検査に問題があれば書き出さない（先に validate で直す）。終わると出力の場所とコマ数を返す。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["out"],
+        "properties": {
+          "project": { "type": "string" },
+          "out": { "type": "string" },
+          "compositionId": { "type": "string" }
+        }
+      }
+    }
+  ]
+}
