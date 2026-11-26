@@ -1,0 +1,10 @@
+[package]
+name = "spike-scene"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wgpu = { workspace = true }
+bytemuck = { version = "1", features = ["derive"] }
+futures-channel = "0.3"
