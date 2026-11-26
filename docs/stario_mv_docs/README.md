@@ -9,6 +9,8 @@
 - 同居の境界：[`ADR-0075`](../yuko_recruit_docs/adr/0075-gamma-repo-boundary.md)（同上）
 - コードと γ の規約：[`apps/stario-mv/`](../../apps/stario-mv/CLAUDE.md)（骨組み・2026-11-26）
 
+- プロジェクトの形：[`adr/MV-0001`](adr/MV-0001-project-schema.md)・正典 [`schemas/mv-project.schema.json`](schemas/mv-project.schema.json)
+
 ## これから置くもの（ADR-0075 決定3）
 
 | 置き場 | 中身 |

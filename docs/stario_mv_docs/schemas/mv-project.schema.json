@@ -1,0 +1,1399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stario.local/schemas/mv-project.schema.json",
+  "title": "すたりおMV プロジェクト（project.json）",
+  "description": "すたりおMV（γ）の動画1本の正典（MV-0001）。⚠️ α（すたりお）の project.schema.json とは全く別の形式（ADR-0074 決定1）。schema で表せない検査（ID の重複・参照先の実在・親の循環・時間の前後）は2段目の検査で行う（MV-0001 決定7）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schemaVersion",
+    "id",
+    "name",
+    "createdAt",
+    "updatedAt",
+    "settings",
+    "assets",
+    "compositions",
+    "mainCompositionId"
+  ],
+  "properties": {
+    "format": {
+      "const": "stario-mv-project",
+      "description": "この形式であることの目印（α の動画と取り違えない）。"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "この schema の版。破壊的な変更では移行を用意する。"
+    },
+    "id": {
+      "$ref": "#/$defs/ProjectId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "settings": {
+      "$ref": "#/$defs/ProjectSettings"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Asset"
+      }
+    },
+    "compositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Composition"
+      }
+    },
+    "mainCompositionId": {
+      "$ref": "#/$defs/CompositionId",
+      "description": "書き出しの既定になるコンポジション。"
+    }
+  },
+  "$defs": {
+    "Ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "ProjectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "AssetId": {
+      "type": "string",
+      "pattern": "^ast_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "CompositionId": {
+      "type": "string",
+      "pattern": "^cmp_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "LayerId": {
+      "type": "string",
+      "pattern": "^lyr_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "EffectId": {
+      "type": "string",
+      "pattern": "^fx_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MaskId": {
+      "type": "string",
+      "pattern": "^msk_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MarkerId": {
+      "type": "string",
+      "pattern": "^mkr_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Rational": {
+      "description": "分数（fps など）。29.97 は {num: 30000, den: 1001}。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "num",
+        "den"
+      ],
+      "properties": {
+        "num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "den": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "Frame": {
+      "type": "integer",
+      "description": "そのコンポジションのフレーム番号（0 始まり）。"
+    },
+    "Vec2": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "Vec3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "Color": {
+      "description": "色＝[赤, 緑, 青, 不透明度]、各 0〜1。値は sRGB で書く（作業用の色空間に関係なく・MV-0001 決定5）。",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "ProjectSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workingColorSpace"
+      ],
+      "properties": {
+        "workingColorSpace": {
+          "enum": [
+            "srgb",
+            "linear"
+          ],
+          "description": "合成・ぼかし・発光を計算する色空間（MV-0001 決定5）。linear＝光の足し算として正しい（発光・ぼかしが自然）。srgb＝AE の既定と同じ見え方。"
+        }
+      }
+    },
+    "Asset": {
+      "description": "素材。B-3＝コピーが標準（copied）、大きい素材は参照だけ（referenced）も選べる。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/AssetId"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "image",
+            "imageSequence",
+            "svg",
+            "audio"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "path"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "copied"
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^assets/",
+                  "description": "プロジェクトのフォルダからの相対パス（assets/ の下）。連番画像は先頭のファイル。"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "absolutePath"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "referenced"
+                },
+                "absolutePath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "コピーせずに指す元の場所。消えたら知らせる（黙って別の素材にしない）。"
+                }
+              }
+            }
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "中身の指紋（差し替わりの検知・解析のキャッシュの鍵）。"
+        },
+        "meta": {
+          "$ref": "#/$defs/AssetMeta"
+        }
+      }
+    },
+    "AssetMeta": {
+      "description": "取り込み時に調べた素材の情報（作り直せる）。",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps": {
+          "$ref": "#/$defs/Rational"
+        },
+        "durationSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "frameCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hasAlpha": {
+          "type": "boolean"
+        },
+        "hasAudio": {
+          "type": "boolean"
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "Composition": {
+      "description": "コンポジション＝レイヤーを積む箱。入れ子にできる（precomp レイヤーで別のコンポジションを置く）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "width",
+        "height",
+        "fps",
+        "durationFrames",
+        "background",
+        "layers",
+        "markers"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CompositionId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384,
+          "description": "画面比は自由（ADR-0074 決定4）。"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "fps": {
+          "$ref": "#/$defs/Rational"
+        },
+        "durationFrames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "background": {
+          "$ref": "#/$defs/Color"
+        },
+        "layers": {
+          "description": "⚠️ 並び＝**先頭が最前面**（レイヤーの一覧の上から順＝AE と同じ見え方・MV-0001 決定6）。描くときは末尾から。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Layer"
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Marker"
+          }
+        }
+      }
+    },
+    "Marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "frame",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/MarkerId"
+        },
+        "frame": {
+          "$ref": "#/$defs/Frame"
+        },
+        "durationFrames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "beat",
+            "bar",
+            "section",
+            "free"
+          ],
+          "description": "拍・小節・区切り（サビ・Aメロ等）・自由。"
+        },
+        "label": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        }
+      }
+    },
+    "Layer": {
+      "description": "レイヤー。type ごとに持つものが違う（共通部分＋種類ごとの部分）。",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "type",
+        "enabled",
+        "locked",
+        "inFrame",
+        "outFrame",
+        "startFrame",
+        "parentId",
+        "transform",
+        "blendMode",
+        "trackMatte",
+        "masks",
+        "effects",
+        "markers"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/LayerId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "video",
+            "image",
+            "text",
+            "shape",
+            "solid",
+            "adjustment",
+            "null",
+            "camera",
+            "audio",
+            "precomp"
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "見せる／隠す。"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string",
+          "description": "利用者が付ける色分けなどの印（描画には効かない）。"
+        },
+        "inFrame": {
+          "$ref": "#/$defs/Frame",
+          "description": "コンポジションの中で見え始めるフレーム（含む）。"
+        },
+        "outFrame": {
+          "$ref": "#/$defs/Frame",
+          "description": "見え終わるフレーム（含まない）。inFrame より大きい（2段目で検査）。"
+        },
+        "startFrame": {
+          "$ref": "#/$defs/Frame",
+          "description": "素材の時刻 0 が置かれるフレーム（切り詰めても素材はずれない）。"
+        },
+        "parentId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LayerId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "親（同じコンポジションのレイヤー・循環しない＝2段目で検査）。"
+        },
+        "threeD": {
+          "type": "boolean",
+          "description": "2.5D（奥行きのある平面）として扱う（γ0.2 から）。"
+        },
+        "transform": {
+          "$ref": "#/$defs/Transform"
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode"
+        },
+        "trackMatte": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "layerId",
+                "mode"
+              ],
+              "properties": {
+                "layerId": {
+                  "$ref": "#/$defs/LayerId"
+                },
+                "mode": {
+                  "enum": [
+                    "alpha",
+                    "alphaInverted",
+                    "luma",
+                    "lumaInverted"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "masks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          }
+        },
+        "effects": {
+          "description": "エフェクトの重ね（上から順に掛ける）。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Marker"
+          }
+        },
+        "assetId": {
+          "$ref": "#/$defs/AssetId"
+        },
+        "compositionId": {
+          "$ref": "#/$defs/CompositionId"
+        },
+        "timeRemap": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "タイムリマップ＝そのフレームで見せる素材の時刻（秒）。無ければ startFrame からそのまま進む。"
+        },
+        "audio": {
+          "$ref": "#/$defs/LayerAudio"
+        },
+        "text": {
+          "$ref": "#/$defs/TextDocument"
+        },
+        "shape": {
+          "$ref": "#/$defs/ShapeContent"
+        },
+        "solid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "color",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/Color"
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "camera": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zoom"
+          ],
+          "properties": {
+            "zoom": {
+              "$ref": "#/$defs/AnimNumber",
+              "description": "焦点距離に当たる値（ピクセル）。γ0.2 から。"
+            }
+          }
+        }
+      },
+      "unevaluatedProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "video",
+                  "image",
+                  "audio"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "assetId"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "precomp"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "compositionId"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "text"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "shape"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "shape"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "solid"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "solid"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "camera"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "enum": [
+                    "video",
+                    "image",
+                    "audio"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "assetId"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "precomp"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "compositionId"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "precomp"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "timeRemap"
+                  ]
+                },
+                {
+                  "required": [
+                    "audio"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "text"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "shape"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "shape"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "solid"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "solid"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "camera"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "camera"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "LayerAudio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "volumeDb",
+        "muted"
+      ],
+      "properties": {
+        "volumeDb": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "音量（dB・0 が元のまま）。"
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Transform": {
+      "description": "変形。単位＝位置・アンカーはピクセル（左上が原点・下が +y）、大きさは倍率（1＝そのまま）、回転は度（時計回り）、不透明度は 0〜1。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "position",
+        "scale",
+        "rotation",
+        "opacity"
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/AnimVec2"
+        },
+        "position": {
+          "$ref": "#/$defs/AnimPosition"
+        },
+        "scale": {
+          "$ref": "#/$defs/AnimVec2",
+          "description": "縦横別の大きさ（倍率）。"
+        },
+        "rotation": {
+          "$ref": "#/$defs/AnimNumber"
+        },
+        "opacity": {
+          "$ref": "#/$defs/AnimNumber"
+        },
+        "rotationX": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "2.5D（threeD のとき）。γ0.2 から。"
+        },
+        "rotationY": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "2.5D（threeD のとき）。γ0.2 から。"
+        }
+      }
+    },
+    "BlendMode": {
+      "enum": [
+        "normal",
+        "add",
+        "multiply",
+        "screen",
+        "overlay",
+        "softLight",
+        "hardLight",
+        "colorDodge",
+        "colorBurn",
+        "darken",
+        "lighten",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
+      ]
+    },
+    "AnimNumber": {
+      "$ref": "#/$defs/Animatable",
+      "description": "数値の動かせる値。",
+      "$comment": "値の型は2段目で見る（schema は形だけ）。"
+    },
+    "AnimVec2": {
+      "$ref": "#/$defs/Animatable"
+    },
+    "AnimPosition": {
+      "$ref": "#/$defs/Animatable",
+      "description": "位置。threeD のときは [x, y, z]。"
+    },
+    "Animatable": {
+      "description": "どの数値も同じ形（ADR-0074 決定2）＝**固定値・キーフレーム・式のどれか1つ**＋任意で**つなぎ**（足し込み）。⚠️ 式は壊れたら書き出しを止める（黙って固定値に戻さない）。",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/AnimValue"
+        },
+        "keyframes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          }
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "description": "つなぎ＝元の値に足し込む（γ0.3 から）。"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "keyframes"
+                ]
+              },
+              {
+                "required": [
+                  "expression"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "keyframes"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "expression"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "expression"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "value"
+                ]
+              },
+              {
+                "required": [
+                  "keyframes"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "AnimValue": {
+      "description": "数値か、数値の並び（2〜3個）。",
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 4
+        }
+      ]
+    },
+    "Keyframe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame",
+        "value",
+        "interpolation"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/Frame"
+        },
+        "value": {
+          "$ref": "#/$defs/AnimValue"
+        },
+        "interpolation": {
+          "enum": [
+            "hold",
+            "linear",
+            "bezier"
+          ],
+          "description": "このキーから次のキーへの進み方。hold＝次のキーまで止める。"
+        },
+        "easeOut": {
+          "$ref": "#/$defs/EaseHandle",
+          "description": "bezier のとき、このキーを出るハンドル。"
+        },
+        "easeIn": {
+          "$ref": "#/$defs/EaseHandle",
+          "description": "bezier のとき、このキーへ入るハンドル（前の区間の終わり）。"
+        },
+        "spatialOut": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 3,
+          "description": "位置の動きの道筋の出るハンドル（キーからの差分・ピクセル）。"
+        },
+        "spatialIn": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 3
+        }
+      }
+    },
+    "EaseHandle": {
+      "description": "区間の進み方の曲線のハンドル＝[時間の割合 0〜1, 値の割合]（CSS の cubic-bezier と同じ考え方・値の割合は 0〜1 を超えてよい＝行き過ぎて戻る）。",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "Expression": {
+      "description": "式（上級者向け・MV-0001 では入れ物だけ。言語と隔離の方法は別の ADR で決める）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "source"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string"
+        }
+      }
+    },
+    "Link": {
+      "description": "つなぎ（宣言的・検査できる）。種類ごとの中身は γ0.3 で足す（MV-0001 では入れ物と種類の名前だけ＝知らない項目は通さない）。",
+      "type": "object",
+      "required": [
+        "kind",
+        "amount"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "audio",
+            "beat",
+            "property"
+          ]
+        },
+        "amount": {
+          "type": "number",
+          "description": "どれだけ足し込むか（元の値の単位）。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "mode",
+        "path",
+        "feather",
+        "opacity",
+        "expansion",
+        "inverted"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/MaskId"
+        },
+        "mode": {
+          "enum": [
+            "add",
+            "subtract",
+            "intersect",
+            "difference"
+          ]
+        },
+        "path": {
+          "description": "形（キーフレームで動かせる）。値は Path（2段目で検査）。",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/Path"
+            },
+            "keyframes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "frame",
+                  "value",
+                  "interpolation"
+                ],
+                "properties": {
+                  "frame": {
+                    "$ref": "#/$defs/Frame"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Path"
+                  },
+                  "interpolation": {
+                    "enum": [
+                      "hold",
+                      "linear",
+                      "bezier"
+                    ]
+                  },
+                  "easeOut": {
+                    "$ref": "#/$defs/EaseHandle"
+                  },
+                  "easeIn": {
+                    "$ref": "#/$defs/EaseHandle"
+                  }
+                }
+              }
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "keyframes"
+              ]
+            }
+          ]
+        },
+        "feather": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "縁のぼかし（ピクセル）。"
+        },
+        "opacity": {
+          "$ref": "#/$defs/AnimNumber"
+        },
+        "expansion": {
+          "$ref": "#/$defs/AnimNumber",
+          "description": "広げる／狭める（ピクセル）。"
+        },
+        "inverted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Path": {
+      "description": "ベジェの形。頂点ごとに入る・出るハンドル（頂点からの差分）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closed",
+        "vertices",
+        "inTangents",
+        "outTangents"
+      ],
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        },
+        "vertices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          }
+        },
+        "inTangents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          }
+        },
+        "outTangents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          }
+        }
+      }
+    },
+    "Effect": {
+      "description": "エフェクト1つ。type＝標準なら stario.〜、OFX なら ofx:〜（決定5）。パラメータの中身は type ごとの定義で検査する（2段目）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "version",
+        "enabled",
+        "params"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/EffectId"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(stario\\.[a-z0-9_.-]+|ofx:.+)$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "エフェクトの版（同じ type でもパラメータの意味が変わったら上げる）。"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Animatable"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/$defs/Color"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "TextDocument": {
+      "description": "文字。γ0.1 は最小（1文字ずつの動き・ルビ・カラオケは γ0.4 で足す）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "fontFamily",
+        "fontSize",
+        "fill"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fontStyle": {
+          "type": "string",
+          "description": "太さ・斜体など（フォントの中の名前）。"
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fill": {
+          "$ref": "#/$defs/Color"
+        },
+        "stroke": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "color",
+            "width"
+          ],
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/Color"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "align": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "lineHeight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "行の高さ（文字の大きさに対する倍率）。"
+        },
+        "letterSpacing": {
+          "type": "number",
+          "description": "字の間（文字の大きさに対する割合）。"
+        },
+        "vertical": {
+          "type": "boolean",
+          "description": "縦書き（γ0.4 から）。"
+        },
+        "boxWidth": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "折り返す幅（無ければ折り返さない）。"
+        }
+      }
+    },
+    "ShapeContent": {
+      "description": "図形。γ0.1 は四角・楕円・自由な形の1つずつ（重ねたグループは後で）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "rectangle",
+            "ellipse",
+            "path"
+          ]
+        },
+        "size": {
+          "$ref": "#/$defs/AnimVec2",
+          "description": "rectangle・ellipse の大きさ（ピクセル）。"
+        },
+        "cornerRadius": {
+          "$ref": "#/$defs/AnimNumber"
+        },
+        "path": {
+          "$ref": "#/$defs/Path"
+        },
+        "fill": {
+          "$ref": "#/$defs/Color"
+        },
+        "stroke": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "color",
+            "width"
+          ],
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/Color"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}
