@@ -1,0 +1,19 @@
+[package]
+name = "stario-mv"
+version = "0.0.1"
+description = "すたりおMV（姉妹ソフト・γ）"
+authors = ["Star System"]
+edition = "2021"
+
+[lib]
+# ⚠️ α（star_recruit_studio_lib）と別の名前＝バイナリ名・インストーラーの識別も分かれる（ADR-0075 決定1）。
+name = "stario_mv_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

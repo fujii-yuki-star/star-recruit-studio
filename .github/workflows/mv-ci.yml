@@ -1,0 +1,77 @@
+name: MV CI
+
+# 姉妹ソフト すたりおMV（γ）の検査（ADR-0075 決定1）。
+# ⚠️ α の CI（ci.yml・test-ci.yml・security-ci.yml）とは別＝α の CI は γ を見ない（ルートの vitest・eslint は `apps/**` を除外）。
+# ⚠️ γ が参照で共有している同梱物（ffmpeg・transcribe）の置き場が変わったときも回す＝`bundle.resources` は存在しないと build が落ちる。
+on:
+  pull_request:
+    paths:
+      - "apps/stario-mv/**"
+      - "src-tauri/resources/ffmpeg/**"
+      - "src-tauri/resources/transcribe/**"
+      - ".github/workflows/mv-ci.yml"
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - "apps/stario-mv/**"
+      - "src-tauri/resources/ffmpeg/**"
+      - "src-tauri/resources/transcribe/**"
+      - ".github/workflows/mv-ci.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/stario-mv
+
+jobs:
+  frontend:
+    name: MV Frontend (lint/typecheck/test/build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/stario-mv/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Node audit (high)
+        run: npm audit --audit-level=high
+
+  rust:
+    name: MV Rust (check/fmt/clippy/test)
+    runs-on: windows-latest
+    env:
+      CARGO_NET_RETRY: "10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/stario-mv/src-tauri
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  rustsec:
+    name: MV RustSec Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # ⚠️ quick-xml の2件は α と同じ理由で一時的に外す（security-ci.yml の注記を参照＝tauri 由来で依存更新では解消できない）。
+      - run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195

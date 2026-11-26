@@ -6,7 +6,8 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // ビルド成果物・外部・実験物は対象外
-  { ignores: ['dist', 'src-tauri/**', '.spike/**', 'node_modules', 'src/domain/validation/generated/**'] },
+  // ⚠️ `apps/**`＝姉妹ソフト すたりおMV（γ）は自分の設定で見る（ADR-0075 決定1）。
+  { ignores: ['dist', 'src-tauri/**', '.spike/**', 'node_modules', 'src/domain/validation/generated/**', 'apps/**'] },
 
   // アプリ本体（React + TS）
   {
