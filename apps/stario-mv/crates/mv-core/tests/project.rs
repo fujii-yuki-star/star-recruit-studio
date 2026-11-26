@@ -328,3 +328,50 @@ fn まだ描けない機能は知らせる() {
         assert!(issues[0].message.contains("γ0.1"), "{}", issues[0].message);
     }
 }
+
+#[test]
+fn 音量のキーフレームはまだ書き出せないと知らせる() {
+    let mut p = minimal();
+    let asset_id = new_id(IdKind::Asset);
+    p.assets.push(Asset {
+        id: asset_id.clone(),
+        kind: AssetKind::Audio,
+        name: "音".into(),
+        source: AssetSource::Copied {
+            path: "assets/a.wav".into(),
+        },
+        sha256: None,
+        meta: None,
+    });
+    let l = solid_layer(&mut p);
+    l.layer_type = LayerType::Audio;
+    l.solid = None;
+    l.asset_id = Some(asset_id);
+    let k = |frame, v| Keyframe {
+        frame,
+        value: AnimValue::Number(v),
+        interpolation: Interpolation::Linear,
+        ease_out: None,
+        ease_in: None,
+        spatial_out: None,
+        spatial_in: None,
+    };
+    l.audio = Some(LayerAudio {
+        volume_db: Animatable::number(0.0),
+        muted: false,
+    });
+    assert_eq!(codes(&p), vec![], "固定の音量は通る");
+    solid_layer(&mut p).audio = Some(LayerAudio {
+        volume_db: Animatable {
+            keyframes: Some(vec![k(0, 0.0), k(10, -6.0)]),
+            ..Default::default()
+        },
+        muted: false,
+    });
+    let issues = validate(&p);
+    assert_eq!(
+        issues.iter().map(|i| i.code).collect::<Vec<_>>(),
+        vec![IssueCode::NotYetSupported]
+    );
+    assert!(issues[0].message.contains("音量のキーフレーム"));
+}

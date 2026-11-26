@@ -43,6 +43,7 @@ const NOT_YET: &[(&str, &str)] = &[
     ("タイムリマップ", "γ0.2"),
     ("2.5D（奥行き・カメラ）", "γ0.2"),
     ("つなぎ", "γ0.3"),
+    ("音量のキーフレーム", "γ0.3"),
     ("縦書き", "γ0.4"),
     ("文字の縁取り", "γ0.4"),
     ("字の間", "γ0.4"),
@@ -370,6 +371,14 @@ impl Checker {
         }
         if let Some(a) = &l.audio {
             self.check_anim(&a.volume_db, &format!("{lpath}/audio/volumeDb"), &[1]);
+            // ⚠️ 書き出しは音量を1つの値で混ぜる＝キーフレームは黙って無視せず知らせる
+            if a.volume_db.keyframes.is_some() {
+                self.push(
+                    IssueCode::NotYetSupported,
+                    format!("{lpath}/audio/volumeDb"),
+                    not_yet("音量のキーフレーム"),
+                );
+            }
         }
         if let Some(c) = &l.camera {
             self.check_anim(&c.zoom, &format!("{lpath}/camera/zoom"), &[1]);

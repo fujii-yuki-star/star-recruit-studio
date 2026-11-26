@@ -1,0 +1,13 @@
+[package]
+name = "mv-export"
+version = "0.0.1"
+description = "すたりおMV の画面なしの書き出し（描画の核で描いたコマを FFmpeg へ流す）。"
+edition = "2021"
+publish = false
+
+[dependencies]
+mv-core = { path = "../mv-core" }
+mv-render = { path = "../mv-render" }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
