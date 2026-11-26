@@ -408,3 +408,46 @@ fn コマンドで映像のレイヤーも書き出せる() {
     assert!(c[0] < 25, "映像の外は背景: {c:?}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// プレビューの音＝書き出しと同じ混ぜ方（時刻・−6 dB・モノラルを左右へそのまま）。機器の速さに合わせて出す。
+#[test]
+fn プレビューの音は書き出しと同じ時刻と大きさ() {
+    let dir = tmpdir();
+    let p = audio_project(&dir);
+    let id = p.main_composition_id.clone();
+    let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 44100)
+        .unwrap()
+        .expect("音がある");
+    assert_eq!(pcm.len() % 2, 0, "左右交互");
+    let len = pcm.len() as f64 / 2.0 / 44100.0;
+    assert!(
+        (len - 3.0).abs() < 0.02,
+        "長さはコンポジションと同じ: {len}"
+    );
+    let rms = |ch: usize, from: f64, to: f64| {
+        let s: Vec<f64> = pcm[(from * 44100.0) as usize * 2..(to * 44100.0) as usize * 2]
+            .iter()
+            .skip(ch)
+            .step_by(2)
+            .map(|v| f64::from(*v))
+            .collect();
+        (s.iter().map(|x| x * x).sum::<f64>() / s.len() as f64).sqrt()
+    };
+    assert!(rms(0, 0.1, 0.9) < 0.005, "前は無音");
+    // 元の正弦波（振幅 1/8）の −6 dB＝実効値は 0.125/√2/2 ≒ 0.0442
+    for ch in [0, 1] {
+        let r = rms(ch, 1.1, 1.9);
+        assert!(
+            (r - 0.0442).abs() < 0.006,
+            "1〜2 秒は −6 dB で左右とも鳴る（ch {ch}）: {r}"
+        );
+    }
+    assert!(rms(0, 2.1, 2.9) < 0.005, "後も無音");
+    // 音の無い動画は None
+    let silent = parse_project(MINIMAL).unwrap();
+    let sid = silent.main_composition_id.clone();
+    assert!(mv_export::mix_pcm(&silent, &sid, &dir, &ffmpeg(), 48000)
+        .unwrap()
+        .is_none());
+    std::fs::remove_dir_all(&dir).ok();
+}

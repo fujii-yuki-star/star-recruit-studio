@@ -2,6 +2,7 @@
 //!
 //! 描くのは専用の糸（[`preview`]）。画面（React）は命令を送るだけ（開く・欄の位置・再生・コマ送り）。
 
+mod audio;
 mod clock;
 mod preview;
 
@@ -104,6 +105,11 @@ fn preview_step(delta: i64, tx: tauri::State<PreviewTx>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn preview_set_muted(muted: bool, tx: tauri::State<PreviewTx>) -> Result<(), String> {
+    tx.send(Cmd::Mute(muted))
+}
+
+#[tauri::command]
 fn preview_set_composition(id: String, tx: tauri::State<PreviewTx>) -> Result<(), String> {
     tx.send(Cmd::Composition(id))
 }
@@ -196,7 +202,8 @@ pub fn run() {
             preview_pause,
             preview_seek,
             preview_step,
-            preview_set_composition
+            preview_set_composition,
+            preview_set_muted
         ])
         .run(tauri::generate_context!())
         .expect("すたりおMV を起動できませんでした");

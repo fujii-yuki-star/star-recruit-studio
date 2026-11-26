@@ -68,41 +68,9 @@ pub fn encode_args(s: &EncodeSpec) -> Vec<String> {
     a.push("-framerate".into());
     a.push(format!("{}/{}", s.fps.num, s.fps.den));
     a.extend(["-i", "-"].map(String::from));
-    for au in &s.audio {
-        a.extend([
-            "-ss".to_string(),
-            fmt(au.source_start_sec),
-            "-t".into(),
-            fmt(au.duration_sec),
-            "-i".into(),
-            au.path.clone(),
-        ]);
-    }
+    a.extend(audio_input_args(&s.audio));
     // 音を混ぜる
-    let mut filter = Vec::new();
-    if !s.audio.is_empty() {
-        let mut labels = String::new();
-        for (i, au) in s.audio.iter().enumerate() {
-            let delay_ms = (au.at_sec * 1000.0).round().max(0.0) as i64;
-            let to_stereo = if au.channels == 1 {
-                "pan=stereo|c0=c0|c1=c0,aresample=48000"
-            } else {
-                "aformat=sample_rates=48000:channel_layouts=stereo"
-            };
-            filter.push(format!(
-                "[{}:a]{to_stereo},adelay={delay_ms}:all=1,volume={}dB[a{i}]",
-                i + 1,
-                fmt(au.volume_db)
-            ));
-            labels.push_str(&format!("[a{i}]"));
-        }
-        // ⚠️ normalize=0＝重ねても勝手に小さくしない（音量はレイヤーの設定どおり）
-        filter.push(format!(
-            "{labels}amix=inputs={}:duration=longest:normalize=0,apad,atrim=0:{}[aout]",
-            s.audio.len(),
-            fmt(s.duration_sec)
-        ));
-    }
+    let mut filter = audio_filter(&s.audio, 1, s.duration_sec);
     // 色＝sRGB → BT.709 の限定範囲（ADR-0069 と同じ考え方）。⚠️ 色の情報（VUI）を書かない道具があるので、流れに直接書き込む。
     filter.push("[0:v]scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p[vout]".into());
     a.push("-filter_complex".into());
@@ -129,6 +97,68 @@ pub fn encode_args(s: &EncodeSpec) -> Vec<String> {
     a.extend(["-bsf:v", "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0"].map(String::from));
     a.extend(["-movflags", "+faststart", "-f", "mp4"].map(String::from));
     a.push(s.out.clone());
+    a
+}
+
+/// 音の素材を入力に足す引数（素材の使う範囲だけ読む）。
+fn audio_input_args(audio: &[AudioInput]) -> Vec<String> {
+    let mut a = Vec::new();
+    for au in audio {
+        a.extend([
+            "-ss".to_string(),
+            fmt(au.source_start_sec),
+            "-t".into(),
+            fmt(au.duration_sec),
+            "-i".into(),
+            au.path.clone(),
+        ]);
+    }
+    a
+}
+
+/// 音を混ぜる filter（`[aout]` に 48kHz ステレオで出す）。`first_input`＝音の最初の入力の番号。
+/// ⚠️ **書き出しとプレビューの両方がこれを通す**＝混ぜ方を1か所に（MV-0007 未解決→プレビューの音）。
+fn audio_filter(audio: &[AudioInput], first_input: usize, duration_sec: f64) -> Vec<String> {
+    let mut filter = Vec::new();
+    if audio.is_empty() {
+        return filter;
+    }
+    let mut labels = String::new();
+    for (i, au) in audio.iter().enumerate() {
+        let delay_ms = (au.at_sec * 1000.0).round().max(0.0) as i64;
+        let to_stereo = if au.channels == 1 {
+            "pan=stereo|c0=c0|c1=c0,aresample=48000"
+        } else {
+            "aformat=sample_rates=48000:channel_layouts=stereo"
+        };
+        filter.push(format!(
+            "[{}:a]{to_stereo},adelay={delay_ms}:all=1,volume={}dB[a{i}]",
+            i + first_input,
+            fmt(au.volume_db)
+        ));
+        labels.push_str(&format!("[a{i}]"));
+    }
+    // ⚠️ normalize=0＝重ねても勝手に小さくしない（音量はレイヤーの設定どおり）
+    filter.push(format!(
+        "{labels}amix=inputs={}:duration=longest:normalize=0,apad,atrim=0:{}[aout]",
+        audio.len(),
+        fmt(duration_sec)
+    ));
+    filter
+}
+
+/// プレビューの音＝書き出しと同じ混ぜ方の音を、生の 32 ビット浮動小数（ステレオ・`sample_rate`）で標準出力へ出す引数。
+pub fn mix_args(audio: &[AudioInput], duration_sec: f64, sample_rate: u32) -> Vec<String> {
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
+        .map(String::from)
+        .to_vec();
+    a.extend(audio_input_args(audio));
+    let mut filter = audio_filter(audio, 0, duration_sec);
+    // 機器の速さが 48kHz でなければ、混ぜたあとに合わせる（混ぜ方は書き出しと同じまま）
+    filter.push(format!("[aout]aresample={sample_rate}[pout]"));
+    a.push("-filter_complex".into());
+    a.push(filter.join(";"));
+    a.extend(["-map", "[pout]", "-f", "f32le", "-ac", "2", "-"].map(String::from));
     a
 }
 
@@ -216,6 +246,32 @@ mod tests {
             f.contains("[a0][a1]amix=inputs=2:duration=longest:normalize=0,apad,atrim=0:3[aout]"),
             "{f}"
         );
+    }
+
+    #[test]
+    fn プレビューの音は書き出しと同じ混ぜ方() {
+        let au = AudioInput {
+            path: "x.wav".into(),
+            source_start_sec: 0.5,
+            duration_sec: 1.0,
+            at_sec: 1.25,
+            volume_db: -6.0,
+            channels: 1,
+        };
+        let enc = encode_args(&spec(vec![au.clone()]));
+        let ef = &enc[enc.iter().position(|x| x == "-filter_complex").unwrap() + 1];
+        let mix = mix_args(&[au], 3.0, 44100);
+        let mf = &mix[mix.iter().position(|x| x == "-filter_complex").unwrap() + 1];
+        // 入力の番号（書き出しは映像が 0 番）だけが違い、ほかは同じ
+        let ea = ef.split(";[0:v]").next().unwrap();
+        assert_eq!(
+            ea.replace("[1:a]", "[0:a]"),
+            mf.split(";[aout]aresample").next().unwrap()
+        );
+        assert!(mf.ends_with("[aout]aresample=44100[pout]"), "{mf}");
+        let j = mix.join(" ");
+        assert!(j.contains("-ss 0.5 -t 1 -i x.wav"), "{j}");
+        assert!(j.ends_with("-map [pout] -f f32le -ac 2 -"), "{j}");
     }
 
     #[test]
