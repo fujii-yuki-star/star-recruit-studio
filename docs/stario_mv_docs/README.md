@@ -7,6 +7,7 @@
 
 - 設計の大枠：[`ADR-0074`](../yuko_recruit_docs/adr/0074-stario-mv-gamma-design.md)（α 側に置いている＝α と γ の両方にかかる決定のため）
 - 同居の境界：[`ADR-0075`](../yuko_recruit_docs/adr/0075-gamma-repo-boundary.md)（同上）
+- コードと γ の規約：[`apps/stario-mv/`](../../apps/stario-mv/CLAUDE.md)（骨組み・2026-11-26）
 
 ## これから置くもの（ADR-0075 決定3）
 
