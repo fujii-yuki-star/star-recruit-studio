@@ -6,7 +6,7 @@
 
 pub mod args;
 
-use args::{encode_args, probe_encoder_args, AudioInput, EncodeSpec, H264_ENCODERS};
+use args::{encode_args, mix_args, probe_encoder_args, AudioInput, EncodeSpec, H264_ENCODERS};
 use mv_core::eval::is_visible_at;
 use mv_core::model::{AssetKind, AssetSource, LayerType, Project};
 use mv_core::validate::{validate, Issue};
@@ -240,8 +240,8 @@ pub fn writing_path(out: &Path) -> PathBuf {
     out.with_file_name(format!(".{name}.writing"))
 }
 
-/// 音のレイヤーと、音を持つ映像のレイヤーを、書き出しに混ぜる音へ（MV-0006 決定5）。
-fn audio_inputs(
+/// 音のレイヤーと、音を持つ映像のレイヤーを、書き出しに混ぜる音へ（MV-0006 決定5）。プレビューの音も同じものを使う。
+pub fn audio_inputs(
     project: &Project,
     comp: &mv_core::model::Composition,
     project_dir: &Path,
@@ -320,6 +320,48 @@ fn audio_inputs(
         });
     }
     Ok(v)
+}
+
+/// プレビューの音＝コンポジション全体を、書き出しと同じ混ぜ方で混ぜた音（ステレオ・`sample_rate`・左右交互の f32）。
+/// 音が1つも無ければ None。⚠️ 混ぜ方は [`args::mix_args`]＝書き出しと同じ filter を通す。
+pub fn mix_pcm(
+    project: &Project,
+    composition_id: &str,
+    project_dir: &Path,
+    ffmpeg: &Path,
+    sample_rate: u32,
+) -> Result<Option<Vec<f32>>, ExportError> {
+    let comp = project
+        .compositions
+        .iter()
+        .find(|c| c.id == composition_id)
+        .ok_or_else(|| {
+            ExportError::Render(RenderError::CompositionNotFound(composition_id.into()))
+        })?;
+    let fps = comp.fps.num as f64 / comp.fps.den as f64;
+    let audio = audio_inputs(project, comp, project_dir, fps, ffmpeg)?;
+    if audio.is_empty() {
+        return Ok(None);
+    }
+    let duration = comp.duration_frames as f64 / fps;
+    let out = Command::new(ffmpeg)
+        .args(mix_args(&audio, duration, sample_rate))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| ExportError::FfmpegNotFound(e.to_string()))?;
+    if !out.status.success() {
+        return Err(ExportError::Ffmpeg(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    Ok(Some(
+        out.stdout
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect(),
+    ))
 }
 
 /// 映像の素材が音を持つか（取り込みのときに調べた値が無いとき）。

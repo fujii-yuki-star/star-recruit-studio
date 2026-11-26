@@ -147,3 +147,9 @@ input:focus-visible {
 .issues code {
   color: var(--muted);
 }
+.notice-inline {
+  color: var(--warn);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}

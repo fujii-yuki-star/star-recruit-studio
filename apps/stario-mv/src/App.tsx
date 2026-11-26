@@ -16,6 +16,8 @@ export function App(): React.JSX.Element {
   const [status, setStatus] = useState<PreviewStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
 
   const comp = project?.compositions.find((c) => c.id === compId) ?? null;
@@ -38,6 +40,7 @@ export function App(): React.JSX.Element {
     const offs = [
       previewApi.onStatus(setStatus),
       previewApi.onError(setError),
+      previewApi.onNotice(setNotice),
       previewApi.onProjectChanged((s) => {
         setProject(s);
         setCompId((id) => (s.compositions.some((c) => c.id === id) ? id : s.mainCompositionId));
@@ -195,6 +198,18 @@ export function App(): React.JSX.Element {
           disabled={!comp}
           onChange={(e) => void previewApi.seek(Number(e.target.value))}
         />
+        <button
+          type="button"
+          aria-pressed={muted}
+          disabled={!comp}
+          onClick={() => {
+            setMuted(!muted);
+            void previewApi.setMuted(!muted);
+          }}
+          title={muted ? "音を鳴らす" : "音を消す"}
+        >
+          {muted ? "🔇" : "🔊"}
+        </button>
         <span className="time" data-testid="timecode">
           {comp ? formatTimecode(frame, comp.fps) : "--:--:--:--"}
         </span>
@@ -206,8 +221,13 @@ export function App(): React.JSX.Element {
         {status && comp && (
           <span className="meta" data-testid="speed">
             {status.playing || status.dropped > 0
-              ? `描画 ${status.fps.toFixed(1)}fps・落としたコマ ${status.dropped}`
+              ? `描画 ${status.fps.toFixed(1)}fps・落としたコマ ${status.dropped}${status.audio ? "・音の時計" : ""}`
               : ""}
+          </span>
+        )}
+        {notice && (
+          <span className="meta notice-inline" role="status">
+            {notice}
           </span>
         )}
       </footer>

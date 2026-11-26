@@ -2,6 +2,7 @@
 //!
 //! ⚠️ 描くのは書き出しと同じ描画の核（`Renderer::render_texture`）。窓へは写すだけ（`mv_render::present`）。
 
+use crate::audio::AudioOut;
 use crate::clock;
 use mv_core::model::Project;
 use mv_render::present::{pick_surface_format, Presenter, Rect};
@@ -9,7 +10,9 @@ use mv_render::text::Fonts;
 use mv_render::{Gpu, Renderer};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, WebviewWindow};
 
@@ -17,16 +20,23 @@ use tauri::{Emitter, WebviewWindow};
 pub const CLEAR: [f32; 4] = [0.078, 0.082, 0.094, 1.0];
 /// 外の変更（project.json）を見る間隔。
 pub const WATCH_INTERVAL: Duration = Duration::from_millis(500);
+/// 音の時計がこれだけ進まなければ、機器が止まったとみなす。
+pub const AUDIO_STALL: Duration = Duration::from_millis(500);
 
 /// 画面からの命令。
 pub enum Cmd {
-    Open { dir: PathBuf, project: Box<Project> },
+    Open {
+        dir: PathBuf,
+        project: Box<Project>,
+    },
     Rect(Rect),
     Play,
     Pause,
     Seek(i64),
     Step(i64),
     Composition(String),
+    /// 音を消す（true）／鳴らす（false）。
+    Mute(bool),
 }
 
 /// 画面へ知らせる今の状態。
@@ -40,6 +50,8 @@ pub struct Status {
     pub fps: f64,
     /// 再生を始めてから間に合わずに飛ばしたコマの数。
     pub dropped: u64,
+    /// 音を鳴らして、その時計で進めているか（音の無い動画・消したとき・機器が無いときは false）。
+    pub audio: bool,
 }
 
 struct Open {
@@ -103,8 +115,8 @@ fn run(
     let fonts = Fonts::load(&refs).map_err(|e| e.to_string())?;
     let presenter = Presenter::new(&gpu.device, view_format);
     let mut renderer = Renderer::new(gpu, fonts);
-    if let Some(f) = ffmpeg {
-        renderer.set_ffmpeg(f);
+    if let Some(f) = &ffmpeg {
+        renderer.set_ffmpeg(f.clone());
     }
 
     let mut open: Option<Open> = None;
@@ -121,6 +133,14 @@ fn run(
     let (mut fps_window, mut fps_count, mut fps) = (Instant::now(), 0u32, 0.0f64);
     let mut last_watch = Instant::now();
     let mut dirty = true;
+    // 音（MV-0007 決定6）：出口・混ぜた音（動画の版ごと）・音の時計の始まり
+    let mut audio_out: Option<AudioOut> = None;
+    let mut version: u64 = 0;
+    let mut mix: Option<(u64, Option<Arc<Vec<f32>>>)> = None;
+    let mut audio_clock: Option<u64> = None;
+    let mut muted = false;
+    // 音の時計の見張り（最後に進んだ位置と時刻）
+    let mut audio_seen: (u64, Instant) = (0, Instant::now());
 
     loop {
         let comp_info = open.as_ref().and_then(|o| {
@@ -137,8 +157,13 @@ fn run(
         });
         let timeout = match (playing, comp_info) {
             (true, Some((cfps, _))) => Duration::from_secs_f64(
-                clock::wait_sec(play_from, cfps, play_start.elapsed().as_secs_f64(), frame)
-                    .clamp(0.001, 0.25),
+                clock::wait_sec(
+                    play_from,
+                    cfps,
+                    elapsed(audio_clock, audio_out.as_ref(), play_start),
+                    frame,
+                )
+                .clamp(0.001, 0.25),
             ),
             _ => Duration::from_millis(250),
         };
@@ -147,6 +172,7 @@ fn run(
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
+        let mut want_play = false;
         for cmd in first.into_iter().chain(rx.try_iter()) {
             let duration = comp_info.map(|c| c.1).unwrap_or(1);
             match cmd {
@@ -160,6 +186,7 @@ fn run(
                     });
                     frame = 0;
                     playing = false;
+                    version += 1;
                 }
                 Cmd::Rect(r) => rect = r,
                 Cmd::Play => {
@@ -167,13 +194,13 @@ fn run(
                         if frame >= duration - 1 {
                             frame = 0; // 最後で押したら最初から
                         }
-                        playing = true;
-                        play_start = Instant::now();
-                        play_from = frame;
-                        dropped = 0;
-                        fps_window = Instant::now();
-                        fps_count = 0;
+                        want_play = true;
                     }
+                }
+                Cmd::Mute(m) => {
+                    muted = m;
+                    // 再生中なら、今のコマから時計を選び直す
+                    want_play = playing;
                 }
                 Cmd::Pause => playing = false,
                 Cmd::Seek(f) => {
@@ -190,11 +217,65 @@ fn run(
                             o.comp_id = id;
                             frame = 0;
                             playing = false;
+                            version += 1;
                         }
                     }
                 }
             }
             dirty = true;
+        }
+        if want_play {
+            playing = true;
+            play_from = frame;
+            dropped = 0;
+            fps_window = Instant::now();
+            fps_count = 0;
+            audio_clock = None;
+            if let (false, Some(o), Some((cfps, _)), Some(ff)) = (muted, &open, comp_info, &ffmpeg)
+            {
+                if audio_out.is_none() {
+                    match AudioOut::open() {
+                        Ok(a) => audio_out = Some(a),
+                        Err(e) => {
+                            let _ = window.emit("preview-notice", Some(e));
+                        }
+                    }
+                }
+                if let Some(a) = &audio_out {
+                    if mix.as_ref().map(|m| m.0) != Some(version) {
+                        let _ = window.emit("preview-notice", Some("音を準備しています…"));
+                        let r = mv_export::mix_pcm(&o.project, &o.comp_id, &o.dir, ff, a.rate);
+                        let pcm = match r {
+                            Ok(p) => {
+                                let _ = window.emit("preview-notice", None::<String>);
+                                p.map(Arc::new)
+                            }
+                            Err(e) => {
+                                let _ = window.emit(
+                                    "preview-notice",
+                                    Some(format!(
+                                        "音を混ぜられませんでした（絵だけ再生します）：{e}"
+                                    )),
+                                );
+                                None
+                            }
+                        };
+                        mix = Some((version, pcm));
+                    }
+                    if let Some((_, Some(pcm))) = &mix {
+                        if let Ok(mut g) = a.shared.pcm.lock() {
+                            *g = Some(pcm.clone());
+                        }
+                        let start = (play_from as f64 / cfps * f64::from(a.rate)).round() as u64;
+                        a.shared.pos.store(start, Ordering::Release);
+                        a.shared.playing.store(true, Ordering::Release);
+                        audio_clock = Some(start);
+                        audio_seen = (start, Instant::now());
+                    }
+                }
+            }
+            // 混ぜている間に過ぎた時間を数えない
+            play_start = Instant::now();
         }
 
         // 外の変更を映す（C-3 の読む側）
@@ -212,6 +293,7 @@ fn run(
                             }
                             let _ = window.emit("project-changed", crate::summary(&o.dir, &l));
                             o.project = l.project;
+                            version += 1;
                             dirty = true;
                         }
                         Err(e) => {
@@ -236,13 +318,30 @@ fn run(
             }
         }
 
+        // 音の機器が止まったら（リモートが切れた など）、黙って固まらずに知らせて時計へ切り替える
+        if let (true, Some(start), Some(a)) = (playing, audio_clock, audio_out.as_ref()) {
+            let pos = a.shared.pos.load(Ordering::Acquire);
+            if pos != audio_seen.0 {
+                audio_seen = (pos, Instant::now());
+            } else if audio_seen.1.elapsed() >= AUDIO_STALL {
+                let done = pos.saturating_sub(start) as f64 / f64::from(a.rate);
+                play_start = Instant::now() - Duration::from_secs_f64(done);
+                audio_clock = None;
+                a.shared.playing.store(false, Ordering::Release);
+                let _ = window.emit(
+                    "preview-notice",
+                    Some("音の機器が止まりました（絵だけ再生しています）。"),
+                );
+            }
+        }
+
         // 再生を進める
         if playing {
             if let Some((cfps, dur)) = comp_info {
                 if let Some(step) = clock::next(
                     play_from,
                     cfps,
-                    play_start.elapsed().as_secs_f64(),
+                    elapsed(audio_clock, audio_out.as_ref(), play_start),
                     frame,
                     dur,
                 ) {
@@ -254,6 +353,7 @@ fn run(
             }
         }
 
+        stop_audio_unless_playing(playing, audio_out.as_ref());
         if !dirty {
             continue;
         }
@@ -276,6 +376,7 @@ fn run(
             },
             None => None,
         };
+        stop_audio_unless_playing(playing, audio_out.as_ref());
         let out = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)
             | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -311,8 +412,26 @@ fn run(
                     playing,
                     fps,
                     dropped,
+                    audio: playing && audio_clock.is_some(),
                 },
             );
         }
+    }
+}
+
+/// 再生の経過（秒）。音を鳴らしていれば鳴らした量で、無ければ時計で数える（MV-0007 決定6）。
+fn elapsed(audio_clock: Option<u64>, out: Option<&AudioOut>, play_start: Instant) -> f64 {
+    match (audio_clock, out) {
+        (Some(start), Some(a)) => {
+            a.shared.pos.load(Ordering::Acquire).saturating_sub(start) as f64 / f64::from(a.rate)
+        }
+        _ => play_start.elapsed().as_secs_f64(),
+    }
+}
+
+/// 止まったら音も止める。
+fn stop_audio_unless_playing(playing: bool, out: Option<&AudioOut>) {
+    if let (false, Some(a)) = (playing, out) {
+        a.shared.playing.store(false, Ordering::Release);
     }
 }

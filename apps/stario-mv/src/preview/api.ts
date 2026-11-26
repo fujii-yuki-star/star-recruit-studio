@@ -25,6 +25,8 @@ export interface PreviewStatus {
   playing: boolean;
   fps: number;
   dropped: number;
+  /** 音を鳴らして、その時計で進めているか。 */
+  audio: boolean;
 }
 
 /** 欄の矩形（物理の画素＝窓の左上から）。 */
@@ -49,10 +51,13 @@ export const previewApi = {
   seek: (frame: number): Promise<void> => invoke("preview_seek", { frame }),
   step: (delta: number): Promise<void> => invoke("preview_step", { delta }),
   setComposition: (id: string): Promise<void> => invoke("preview_set_composition", { id }),
+  setMuted: (muted: boolean): Promise<void> => invoke("preview_set_muted", { muted }),
   onStatus: (f: (s: PreviewStatus) => void): Promise<UnlistenFn> =>
     listen<PreviewStatus>("preview-status", (e) => f(e.payload)),
   onError: (f: (m: string | null) => void): Promise<UnlistenFn> =>
     listen<string | null>("preview-error", (e) => f(e.payload)),
+  onNotice: (f: (m: string | null) => void): Promise<UnlistenFn> =>
+    listen<string | null>("preview-notice", (e) => f(e.payload)),
   onProjectChanged: (f: (s: ProjectSummary) => void): Promise<UnlistenFn> =>
     listen<ProjectSummary>("project-changed", (e) => f(e.payload)),
 };

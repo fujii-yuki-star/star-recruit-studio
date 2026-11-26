@@ -91,6 +91,24 @@ describe("プレビュー画面", () => {
     expect(screen.getByTestId("timecode").textContent).toBe("00:00:00:00");
   });
 
+  it("音を消す／鳴らすを Rust へ伝え、音の時計と知らせを出す", async () => {
+    await mount();
+    const btn = screen.getByTitle("音を消す");
+    fireEvent.click(btn);
+    expect(calls.at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: true } });
+    expect(screen.getByTitle("音を鳴らす").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByTitle("音を鳴らす"));
+    expect(calls.at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: false } });
+    act(() =>
+      handlers["preview-status"]({ compositionId: "cmp_A", frame: 3, playing: true, fps: 30, dropped: 0, audio: true }),
+    );
+    expect(screen.getByTestId("speed").textContent).toBe("描画 30.0fps・落としたコマ 0・音の時計");
+    act(() => handlers["preview-notice"]("音を出せる機器が見つかりません（絵だけ再生します）。"));
+    expect(screen.getByRole("status").textContent).toContain("絵だけ再生します");
+    act(() => handlers["preview-notice"](null));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("描けないときは理由を欄の上に出す", async () => {
     await mount();
     act(() => handlers["preview-error"]("コマ 3 を描けませんでした：素材が見つかりません"));
