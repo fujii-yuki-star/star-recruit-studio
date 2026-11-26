@@ -79,6 +79,9 @@
 
 **videoKind**（`recruit` / `general`。**省略時は `recruit`**＝後方互換。ADR-0011）で用途を分け、`purpose` の許可値も種類で切り替える（`project.schema.json` の `if/then/else`）。
 
+> ⚠️ **「省略時は `recruit`」は読み込みの互換の規則**（`videoKind` の無い古い文書＝採用専用時代のものを採用として読む）。**新しい動画の土台は `general`**（空の `generalBrief`・一般の目的の先頭）で、アプリは保存のたびに `videoKind` を書く（ADR-0076 決定4）。
+> 「採用動画」を新しく作る入口は**拡張パックの鍵 `recruit-video`** があるときだけ出す（schema は変えない＝鍵は見せ方の話・ADR-0076）。
+
 **recruit（採用・会社紹介）の purpose**
 
 | code | UI表示（`06`） | 旧表記（廃止） |
@@ -289,7 +292,7 @@
 | フィールド | 型 | 必須 | 制約・既定 |
 |---|---|:--:|---|
 | schemaVersion | string | ● | `"1.2"`（ADR-0011 で 1.0→1.1・ADR-0012 で 1.1→1.2。§1） |
-| videoKind | enum | ○ | `recruit`/`general`。省略時 `recruit`＝後方互換（§3.1・ADR-0011） |
+| videoKind | enum | ○ | `recruit`/`general`。省略時 `recruit`＝読み込みの後方互換（新しい動画は `general`＝§3.1・ADR-0011・ADR-0076） |
 | projectId | string | ● | §2.1 |
 | projectName | string | ● | 1–80字 |
 | purpose | string(enum) | ● | §3.1。**videoKind で許可値が変わる**（recruit→採用 enum／general→一般 enum）。AI出力 `videoPlan.purpose` の対応先 |

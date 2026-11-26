@@ -79,6 +79,15 @@
 - **実装（資料確定後）**：`domain`（`videoKind` 型・`generalBrief`・入力アセンブリの分岐を純粋関数化＋テスト）／`infrastructure`（プロバイダのプロンプト切替）／`app`（ウィザード分岐 UI）／stario 改称（docs/UI）。
 - 描画・書き出し・声・`ai-video-plan` 出力契約は**無改修で流用**。
 
+## 追補（2026-11-26・ADR-0076）＝「採用動画」は拡張パックの鍵で出す
+
+- **2系統の形（`videoKind`・`purpose` の切り替え・`companyInfo`／`generalBrief` の排他）は変えない**。schema も据え置き。
+- 改めたのは**見せ方と既定**：
+  - 「採用動画」は拡張パックの鍵 `recruit-video` があるときだけ、新しく作る入口に出る。
+  - 新しい動画の土台は**一般**（以前は採用・新卒採用）。
+  - 鍵が無くても、作った採用動画は開いて直せる。
+- ⚠️ **「省略時は `recruit`」は読み込みの互換の規則として残す**＝`videoKind` の無い古い文書（1.0）は採用専用時代のものなので、採用として読む。新しい動画の既定とは別の話。
+
 ## 未解決の論点
 
 > ⚠️ **1・3・11 は schema に反映済み**（2026-10-19 注記）＝`companyInfo` は条件つき（`videoKind=general` の `if`）・`additionalNotes` はトップレベル・版は上がっている（`project.schema.json`）。
