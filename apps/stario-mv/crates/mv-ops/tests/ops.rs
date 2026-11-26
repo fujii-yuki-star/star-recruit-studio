@@ -657,3 +657,23 @@ fn すたりおmvの動画でなければ読まない() {
     assert_eq!(e.code, "load");
     assert!(e.message.contains("すたりおMV の動画ではありません"));
 }
+
+#[test]
+fn 許すフォルダは長い場所の印を外して保存する() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = root.path().join("cfg");
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_stario-mv-ai"))
+        .args(["allow", &p(root.path())])
+        .env("STARIO_MV_CONFIG_DIR", &cfg)
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    let s = fs::read_to_string(cfg.join("ai-settings.json")).unwrap();
+    assert!(!s.contains(r"\\?\\"), "{s}");
+    let saved: Value = serde_json::from_str(&s).unwrap();
+    let f = PathBuf::from(saved["allowedFolders"][0].as_str().unwrap());
+    assert_eq!(
+        f.canonicalize().unwrap(),
+        root.path().canonicalize().unwrap()
+    );
+}

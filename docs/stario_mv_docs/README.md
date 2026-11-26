@@ -14,6 +14,7 @@
 - 画面なしの書き出し：[`adr/MV-0004`](adr/MV-0004-headless-export.md)（MP4・H.264・音・守ること）
 - 外部 AI の操作口：[`adr/MV-0005`](adr/MV-0005-ai-operations.md)（MCP とコマンド・取引・許す範囲）・操作の一覧の正典 [`schemas/mv-operations.json`](schemas/mv-operations.json)
 - 素材の取り込み：[`adr/MV-0006`](adr/MV-0006-asset-import.md)（コピーか参照・種類と調べること・映像〔透過付きも〕・連番・SVG の描き方・映像の音）
+- プレビュー画面：[`adr/MV-0007`](adr/MV-0007-preview-screen.md)（描画の核の絵を窓へ写す・再生の時計と落としたコマ・外の変更をすぐ映す・操作のキー）
 - プレビューの方式：[`adr/MV-0002`](adr/MV-0002-preview-native-window.md)（ネイティブの窓＋透明な画面を重ねる）・試作の結果 [`research/2026-11-preview-spike.md`](research/2026-11-preview-spike.md)
 
 ## これから置くもの（ADR-0075 決定3）

@@ -4,6 +4,7 @@
 //! 流れ＝レイヤーの中身を画素にする（CPU・[`raster`]）→ GPU で下から順に描画モードで混ぜる（[`composite.wgsl`]）。
 
 pub mod media;
+pub mod present;
 pub mod raster;
 pub mod text;
 
@@ -87,6 +88,31 @@ impl Gpu {
             queue,
             adapter_name: format!("{} ({:?})", info.name, info.backend),
         })
+    }
+
+    /// 窓（surface）に描ける GPU を選ぶ＝プレビューで、描画の核と窓の両方に同じものを使う（MV-0007 決定1）。
+    pub fn for_surface(
+        instance: &wgpu::Instance,
+        surface: &wgpu::Surface,
+    ) -> Result<(Self, wgpu::Adapter), RenderError> {
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(surface),
+            ..Default::default()
+        }))
+        .map_err(|e| RenderError::NoGpu(e.to_string()))?;
+        let info = adapter.get_info();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .map_err(|e| RenderError::NoGpu(e.to_string()))?;
+        Ok((
+            Self {
+                device,
+                queue,
+                adapter_name: format!("{} ({:?})", info.name, info.backend),
+            },
+            adapter,
+        ))
     }
 }
 
@@ -244,7 +270,12 @@ impl Renderer {
         &self.gpu.adapter_name
     }
 
-    /// コンポジションのある時刻を描く。`project_dir`＝素材（`assets/`）を読む場所。
+    /// 描く道具の GPU（プレビューが窓へ写すときに同じものを使う）。
+    pub fn gpu(&self) -> &Gpu {
+        &self.gpu
+    }
+
+    /// コンポジションのある時刻を描く（書き出しと同じ）。
     pub fn render(
         &mut self,
         project: &Project,
@@ -252,6 +283,20 @@ impl Renderer {
         frame: i64,
         project_dir: &Path,
     ) -> Result<Frame, RenderError> {
+        let tex = self.render_texture(project, composition_id, frame, project_dir)?;
+        let size = tex.size();
+        read_back(&self.gpu, &tex, size.width, size.height)
+    }
+
+    /// コンポジションのある時刻を描いて、GPU に置いたままの絵を返す（乗算していない sRGB の RGBA8）。
+    /// `project_dir`＝素材（`assets/`）を読む場所。⚠️ プレビューはこれを窓へ写す＝書き出しと同じ絵（MV-0007 決定1）。
+    pub fn render_texture(
+        &mut self,
+        project: &Project,
+        composition_id: &str,
+        frame: i64,
+        project_dir: &Path,
+    ) -> Result<wgpu::Texture, RenderError> {
         let comp = project
             .compositions
             .iter()
@@ -470,7 +515,8 @@ impl Renderer {
             }
             other => {
                 return Err(RenderError::NotYetSupported(format!(
-                    "{other:?} のレイヤー"
+                    "{}のレイヤー",
+                    layer_type_name(other)
                 )))
             }
         };
@@ -649,7 +695,7 @@ impl Renderer {
         w: u32,
         h: u32,
         linear: bool,
-    ) -> Result<Frame, RenderError> {
+    ) -> Result<wgpu::Texture, RenderError> {
         let d = &self.gpu.device;
         let out = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("out"),
@@ -662,7 +708,9 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: OUT_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         // 仕上げの段は中身を読まない（同じ形の束を使うため、小さな空の中身を渡す）
@@ -689,11 +737,12 @@ impl Renderer {
             pad: 0,
         };
         self.pass(&self.final_pipeline, &u, &dummy, accum, &out);
-        read_back(&self.gpu, &out, w, h)
+        Ok(out)
     }
 }
 
-fn read_back(gpu: &Gpu, tex: &wgpu::Texture, w: u32, h: u32) -> Result<Frame, RenderError> {
+/// GPU の絵を CPU へ読み戻す（書き出し・検査）。
+pub fn read_back(gpu: &Gpu, tex: &wgpu::Texture, w: u32, h: u32) -> Result<Frame, RenderError> {
     let row = w * 4;
     let padded = row.div_ceil(256) * 256;
     let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -791,6 +840,22 @@ fn read_asset(path: &Path) -> Result<Vec<u8>, RenderError> {
             path.display()
         ))
     })
+}
+
+/// レイヤーの種類の名前（知らせる文に出す・AE の呼び名）。
+pub fn layer_type_name(t: LayerType) -> &'static str {
+    match t {
+        LayerType::Video => "映像",
+        LayerType::Image => "画像",
+        LayerType::Text => "文字",
+        LayerType::Shape => "シェイプ",
+        LayerType::Solid => "平面",
+        LayerType::Adjustment => "調整",
+        LayerType::Null => "ヌル",
+        LayerType::Camera => "カメラ",
+        LayerType::Audio => "音",
+        LayerType::Precomp => "プリコンポーズ",
+    }
 }
 
 fn srgb_to_linear(c: f64) -> f64 {

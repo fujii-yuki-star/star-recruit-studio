@@ -1,0 +1,149 @@
+/* すたりおMV（γ）の画面。⚠️ プレビューの欄（.preview）は透明＝その下に Rust が窓へ直接描いている（MV-0002）。
+   ほかの欄は必ず地の色を塗る（窓が透明なので、塗らないと下が透ける）。 */
+:root {
+  --bg: #141518; /* 帯の色と同じ（preview.rs の CLEAR） */
+  --panel: #1d1f24;
+  --line: #2c2f36;
+  --text: #e6e8ec;
+  --muted: #9aa0ab;
+  --accent: #4f8cff;
+  --warn: #ffb547;
+  color-scheme: dark;
+  font-family: "Segoe UI", "Yu Gothic UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+}
+.app {
+  display: grid;
+  grid-template-rows: 40px 1fr 48px;
+  height: 100%;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-color: var(--line);
+  border-style: solid;
+  border-width: 0;
+}
+.top {
+  border-bottom-width: 1px;
+}
+.transport {
+  border-top-width: 1px;
+}
+h1 {
+  font-size: 14px;
+  margin: 0 8px 0 0;
+  font-weight: 600;
+}
+button,
+select {
+  background: #272a31;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  height: 26px;
+  padding: 0 10px;
+  font: inherit;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.4;
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.transport button {
+  min-width: 34px;
+  padding: 0 6px;
+}
+.transport .play {
+  min-width: 44px;
+}
+.transport input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.name {
+  color: var(--muted);
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.time {
+  font-variant-numeric: tabular-nums;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 14px;
+}
+.meta {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.stage {
+  display: flex;
+  min-height: 0;
+}
+.preview {
+  flex: 1;
+  position: relative;
+  background: transparent;
+}
+.hint,
+.notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  max-width: 70%;
+  background: rgba(20, 21, 24, 0.85);
+}
+.hint {
+  color: var(--muted);
+}
+.notice {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+}
+.issues {
+  width: 320px;
+  overflow: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 8px 12px;
+}
+.issues h2 {
+  font-size: 13px;
+  color: var(--warn);
+}
+.issues ul {
+  padding-left: 16px;
+}
+.issues code {
+  color: var(--muted);
+}

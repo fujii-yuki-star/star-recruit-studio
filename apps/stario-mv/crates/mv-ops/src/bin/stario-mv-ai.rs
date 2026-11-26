@@ -95,6 +95,12 @@ fn main() {
                 );
                 std::process::exit(1)
             };
+            // 表示と保存は Windows の長い場所の印（`\\?\`）を外した形で
+            let p = p
+                .to_str()
+                .and_then(|s| s.strip_prefix(r"\\?\"))
+                .map(PathBuf::from)
+                .unwrap_or(p);
             let mut s = settings;
             if !s.allowed_folders.contains(&p) {
                 s.allowed_folders.push(p.clone());

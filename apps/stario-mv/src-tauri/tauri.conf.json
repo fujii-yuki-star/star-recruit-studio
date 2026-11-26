@@ -17,7 +17,8 @@
         "width": 1600,
         "height": 900,
         "minWidth": 1280,
-        "minHeight": 720
+        "minHeight": 720,
+        "transparent": true
       }
     ],
     "security": {
@@ -47,7 +48,8 @@
     ],
     "resources": {
       "../../../src-tauri/resources/ffmpeg": "ffmpeg",
-      "../../../src-tauri/resources/transcribe": "transcribe"
+      "../../../src-tauri/resources/transcribe": "transcribe",
+      "../../../public/fonts": "fonts"
     }
   }
 }
