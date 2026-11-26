@@ -1,0 +1,19 @@
+[package]
+name = "mv-render"
+version = "0.0.1"
+description = "すたりおMV の描画の核（ある時刻の1コマを描く）。プレビュー・書き出し・外部 AI の「1コマ描く」で同じものを使う（MV-0002）。"
+edition = "2021"
+publish = false
+
+[dependencies]
+mv-core = { path = "../mv-core" }
+wgpu = "30"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+futures-channel = "0.3"
+tiny-skia = "0.12"
+cosmic-text = "0.19"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+[dev-dependencies]
+serde_json = "1"
