@@ -1,0 +1,5 @@
+# すたりおMV（γ）の Rust のまとまり（ADR-0075＝α の src-tauri とは別・γ の中だけ）。
+# ⚠️ 芯（mv-core）は画面にも Tauri にも依存しない＝アプリ・画面なしの書き出し・外部 AI の口で同じものを使う。
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/mv-core"]

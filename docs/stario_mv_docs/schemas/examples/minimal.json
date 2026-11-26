@@ -5,7 +5,9 @@
   "name": "いちばん小さい動画",
   "createdAt": "2026-11-26T00:00:00Z",
   "updatedAt": "2026-11-26T00:00:00Z",
-  "settings": { "workingColorSpace": "linear" },
+  "settings": {
+    "workingColorSpace": "linear"
+  },
   "assets": [],
   "compositions": [
     {
@@ -13,9 +15,17 @@
       "name": "本編",
       "width": 1920,
       "height": 1080,
-      "fps": { "num": 30, "den": 1 },
+      "fps": {
+        "num": 30,
+        "den": 1
+      },
       "durationFrames": 90,
-      "background": [0, 0, 0, 1],
+      "background": [
+        0,
+        0,
+        0,
+        1
+      ],
       "markers": [],
       "layers": [
         {
@@ -29,19 +39,61 @@
           "startFrame": 0,
           "parentId": null,
           "transform": {
-            "anchor": { "value": [0, 0] },
-            "position": {
-              "keyframes": [
-                { "frame": 0, "value": [960, 600], "interpolation": "bezier", "easeOut": [0.3, 0] },
-                { "frame": 20, "value": [960, 540], "interpolation": "hold", "easeIn": [0.2, 1] }
+            "anchor": {
+              "value": [
+                0,
+                0
               ]
             },
-            "scale": { "value": [1, 1] },
-            "rotation": { "value": 0 },
+            "position": {
+              "keyframes": [
+                {
+                  "frame": 0,
+                  "value": [
+                    960,
+                    600
+                  ],
+                  "interpolation": "bezier",
+                  "easeOut": [
+                    0.3,
+                    0
+                  ]
+                },
+                {
+                  "frame": 20,
+                  "value": [
+                    960,
+                    540
+                  ],
+                  "interpolation": "hold",
+                  "easeIn": [
+                    0.2,
+                    1
+                  ]
+                }
+              ]
+            },
+            "scale": {
+              "value": [
+                1,
+                1
+              ]
+            },
+            "rotation": {
+              "value": 0
+            },
             "opacity": {
               "keyframes": [
-                { "frame": 0, "value": 0, "interpolation": "linear" },
-                { "frame": 15, "value": 1, "interpolation": "hold" }
+                {
+                  "frame": 0,
+                  "value": 0,
+                  "interpolation": "linear"
+                },
+                {
+                  "frame": 15,
+                  "value": 1,
+                  "interpolation": "hold"
+                }
               ]
             }
           },
@@ -50,7 +102,18 @@
           "masks": [],
           "effects": [],
           "markers": [],
-          "text": { "text": "すたりおMV", "fontFamily": "Gen Interface JP", "fontSize": 120, "fill": [1, 1, 1, 1], "align": "center" }
+          "text": {
+            "text": "すたりおMV",
+            "fontFamily": "Gen Interface JP",
+            "fontSize": 120,
+            "fill": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "align": "center"
+          }
         },
         {
           "id": "lyr_01JDQ0000000000000000000Y2",
@@ -63,20 +126,46 @@
           "startFrame": 0,
           "parentId": null,
           "transform": {
-            "anchor": { "value": [960, 540] },
-            "position": { "value": [960, 540] },
-            "scale": { "value": [1, 1] },
-            "rotation": { "value": 0 },
-            "opacity": { "value": 1 }
+            "anchor": {
+              "value": [
+                960,
+                540
+              ]
+            },
+            "position": {
+              "value": [
+                960,
+                540
+              ]
+            },
+            "scale": {
+              "value": [
+                1,
+                1
+              ]
+            },
+            "rotation": {
+              "value": 0
+            },
+            "opacity": {
+              "value": 1
+            }
           },
           "blendMode": "normal",
           "trackMatte": null,
           "masks": [],
-          "effects": [
-            { "id": "fx_01JDQ0000000000000000000F1", "type": "stario.blur.gaussian", "version": 1, "enabled": true, "params": { "radius": { "value": 8 } } }
-          ],
+          "effects": [],
           "markers": [],
-          "solid": { "color": [0.1, 0.1, 0.3, 1], "width": 1920, "height": 1080 }
+          "solid": {
+            "color": [
+              0.1,
+              0.1,
+              0.3,
+              1
+            ],
+            "width": 1920,
+            "height": 1080
+          }
         }
       ]
     }
