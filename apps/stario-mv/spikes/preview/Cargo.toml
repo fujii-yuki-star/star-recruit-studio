@@ -1,0 +1,7 @@
+# 捨てる前提の試作（MV-0002 の材料）。γ 本体のワークスペースとは別。
+[workspace]
+resolver = "2"
+members = ["scene", "web", "native"]
+
+[workspace.dependencies]
+wgpu = "30"

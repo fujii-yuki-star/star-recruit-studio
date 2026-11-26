@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>試作：プレビュー方式</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; color: #eee; }
+  body.mode-a { background: #111; }
+  body.mode-b { background: transparent; }
+  #bar { position: fixed; left: 12px; top: 12px; right: 12px; display: flex; gap: 8px; align-items: center; background: rgba(20, 20, 30, 0.85); padding: 8px 12px; border-radius: 6px; z-index: 2; }
+  #bar button { padding: 4px 10px; }
+  #c { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  #log { position: fixed; left: 12px; bottom: 12px; width: 520px; max-height: 50%; overflow: auto; font: 12px/1.4 monospace; background: rgba(20, 20, 30, 0.85); padding: 8px; border-radius: 6px; white-space: pre-wrap; z-index: 2; }
+  /* 方式 (b) の重ね合わせの確認用＝描画の上に載る UI（半透明の枠と選択の印） */
+  #handles { position: fixed; left: 40%; top: 35%; width: 240px; height: 160px; border: 2px dashed #ffd400; z-index: 2; pointer-events: none; display: none; }
+  body.mode-b #handles { display: block; }
+</style>
+</head>
+<body class="mode-a">
+<div id="bar"><b>試作</b><span id="status">準備中…</span></div>
+<canvas id="c"></canvas>
+<div id="handles"></div>
+<div id="log"></div>
+<script type="module">
+import init, { create, readback, gpu_bench } from "./pkg/spike_web.js";
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const log = (m) => { document.getElementById("log").textContent += m + "\n"; };
+const status = (m) => { document.getElementById("status").textContent = m; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = { env: { ua: navigator.userAgent, dpr: devicePixelRatio, screen: [screen.width, screen.height] } };
+const COUNTS = [1000, 4000, 16000, 64000];
+const SECS = 4;
+
+async function sweepA() {
+  document.body.className = "mode-a";
+  const c = document.getElementById("c");
+  c.width = 1920; c.height = 1080;
+  const runner = await create("c", COUNTS[0]);
+  results.a = { info: runner.adapter_info(), rows: [] };
+  for (const n of COUNTS) {
+    runner.set_count(n);
+    status(`方式a: ${n} 個`);
+    let frames = 0, cpu = 0;
+    const t0 = performance.now();
+    await new Promise((done) => {
+      const step = (now) => {
+        const s = performance.now();
+        runner.frame(now / 1000);
+        cpu += performance.now() - s;
+        frames++;
+        if (now - t0 < SECS * 1000) requestAnimationFrame(step); else done();
+      };
+      requestAnimationFrame(step);
+    });
+    const secs = (performance.now() - t0) / 1000;
+    const row = { count: n, fps: +(frames / secs).toFixed(1), jsMsPerFrame: +(cpu / frames).toFixed(2) };
+    results.a.rows.push(row);
+    log(`a ${JSON.stringify(row)}`);
+  }
+}
+
+async function sweepB() {
+  document.body.className = "mode-b";
+  document.getElementById("c").style.display = "none";
+  results.b = { rows: [] };
+  let last = null;
+  const un1 = await listen("native-stats", (e) => { last = e.payload; });
+  const un2 = await listen("native-error", (e) => { results.b.error = e.payload; log("b error " + e.payload); });
+  for (const n of COUNTS) {
+    status(`方式b: ${n} 個`);
+    await invoke("start_native", { count: n, vsync: true });
+    await sleep(1500);
+    last = null;
+    await sleep(SECS * 1000);
+    if (last) { results.b.rows.push({ count: n, fps: +last.fps.toFixed(1), rustMsPerFrame: +last.cpu_ms.toFixed(2) }); results.b.adapter = last.adapter; results.b.format = last.format; log(`b ${JSON.stringify(last)}`); }
+  }
+  await invoke("phase", { name: "b-overlay" });
+  status("方式b: 重ね合わせの確認（描画の上に黄色の枠と、この帯が見えるか）");
+  await invoke("start_native", { count: 4000, vsync: true });
+  await sleep(6000);
+  await invoke("stop_native");
+  un1(); un2();
+  await sleep(500);
+}
+
+async function ipc() {
+  status("Rust → 画面へ大きなコマを送る速さ");
+  results.ipc = [];
+  for (const [label, size, n] of [["1080p RGBA", 1920 * 1080 * 4, 20], ["4K RGBA", 3840 * 2160 * 4, 6]]) {
+    await invoke("ipc_bench", { size: 1024 });
+    const t0 = performance.now();
+    let bytes = 0;
+    for (let i = 0; i < n; i++) { const buf = await invoke("ipc_bench", { size }); bytes += buf.byteLength; }
+    const ms = (performance.now() - t0) / n;
+    const row = { label, msPerFrame: +ms.toFixed(1), mbPerSec: +((bytes / 1e6) / ((performance.now() - t0) / 1000)).toFixed(0), maxFpsByTransfer: +(1000 / ms).toFixed(1) };
+    results.ipc.push(row);
+    log(`ipc ${JSON.stringify(row)}`);
+  }
+  const ms = await invoke("native_upload_bench", { n: 30 });
+  results.nativeUpload1080p = { msPerFrame: +ms.toFixed(2), maxFps: +(1000 / ms).toFixed(0) };
+  log(`native upload ${JSON.stringify(results.nativeUpload1080p)}`);
+}
+
+async function gpu() {
+  status("GPU の重さ（画面なし・vsync なし）");
+  results.gpu = [];
+  for (const n of [16000, 64000, 256000]) {
+    const a = await gpu_bench(1920, 1080, n, 60);
+    const b = await invoke("native_gpu_bench", { width: 1920, height: 1080, count: n, frames: 60 });
+    const row = { count: n, wasmMsPerFrame: +a.toFixed(2), nativeMsPerFrame: +b.toFixed(2) };
+    results.gpu.push(row);
+    log(`gpu ${JSON.stringify(row)}`);
+  }
+}
+
+async function match() {
+  status("同じ絵になるか（ネイティブ と WebAssembly の画面なし描画を比べる）");
+  const [w, h, t, n] = [1280, 720, 1.5, 4000];
+  const a = new Uint8Array(await readback(w, h, t, n));
+  const b = new Uint8Array(await invoke("native_readback", { width: w, height: h, time: t, count: n }));
+  let max = 0, diffPx = 0, sumSq = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    let px = 0;
+    for (let k = 0; k < 3; k++) { const d = Math.abs(a[i + k] - b[i + k]); px = Math.max(px, d); sumSq += d * d; }
+    max = Math.max(max, px);
+    if (px > 1) diffPx++;
+  }
+  const mse = sumSq / ((a.length / 4) * 3);
+  results.match = { sameLength: a.length === b.length, maxChannelDiff: max, pixelsOver1: diffPx, totalPixels: a.length / 4, psnr: mse === 0 ? "identical" : +(10 * Math.log10(255 * 255 / mse)).toFixed(1) };
+  log(`match ${JSON.stringify(results.match)}`);
+}
+
+(async () => {
+  try {
+    await invoke("phase", { name: "start" });
+    await init();
+    const steps = (location.hash.slice(1) || "gpu,b,ipc,match,a").split(",");
+    if (steps.includes("gpu")) await gpu();
+    if (steps.includes("b")) await sweepB();
+    if (steps.includes("ipc")) await ipc();
+    if (steps.includes("match")) await match();
+    if (steps.includes("a")) await sweepA();
+  } catch (e) {
+    results.error = String(e?.stack || e);
+    log("error " + results.error);
+  }
+  await invoke("save_results", { json: JSON.stringify(results, null, 2) });
+  await invoke("phase", { name: "done" });
+  status("終わり");
+  await sleep(1500);
+  await invoke("quit");
+})();
+</script>
+</body>
+</html>

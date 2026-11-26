@@ -10,6 +10,7 @@
 - コードと γ の規約：[`apps/stario-mv/`](../../apps/stario-mv/CLAUDE.md)（骨組み・2026-11-26）
 
 - プロジェクトの形：[`adr/MV-0001`](adr/MV-0001-project-schema.md)・正典 [`schemas/mv-project.schema.json`](schemas/mv-project.schema.json)
+- プレビューの方式：[`adr/MV-0002`](adr/MV-0002-preview-native-window.md)（ネイティブの窓＋透明な画面を重ねる）・試作の結果 [`research/2026-11-preview-spike.md`](research/2026-11-preview-spike.md)
 
 ## これから置くもの（ADR-0075 決定3）
 

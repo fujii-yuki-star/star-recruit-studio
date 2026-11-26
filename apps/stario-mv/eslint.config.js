@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 // すたりおMV（γ）の lint。⚠️ α のルートの設定とは別（ルート側は `apps/**` を見ない＝ADR-0075 決定1）。
 export default tseslint.config(
-  { ignores: ['dist', 'src-tauri/**', 'node_modules'] },
+  { ignores: ['dist', 'src-tauri/**', 'node_modules', 'target', 'spikes/**'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

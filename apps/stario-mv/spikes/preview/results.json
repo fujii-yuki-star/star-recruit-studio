@@ -1,0 +1,103 @@
+{
+  "env": {
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0",
+    "dpr": 1,
+    "screen": [
+      1920,
+      1080
+    ]
+  },
+  "gpu": [
+    {
+      "count": 16000,
+      "wasmMsPerFrame": 24.15,
+      "nativeMsPerFrame": 19.28
+    },
+    {
+      "count": 64000,
+      "wasmMsPerFrame": 93.11,
+      "nativeMsPerFrame": 76.28
+    },
+    {
+      "count": 256000,
+      "wasmMsPerFrame": 380.09,
+      "nativeMsPerFrame": 306.4
+    }
+  ],
+  "b": {
+    "rows": [
+      {
+        "count": 1000,
+        "fps": 32,
+        "rustMsPerFrame": 0.38
+      },
+      {
+        "count": 4000,
+        "fps": 32,
+        "rustMsPerFrame": 0.36
+      },
+      {
+        "count": 16000,
+        "fps": 32,
+        "rustMsPerFrame": 0.4
+      },
+      {
+        "count": 64000,
+        "fps": 15.7,
+        "rustMsPerFrame": 0.38
+      }
+    ],
+    "adapter": "Intel(R) Graphics (Vulkan)",
+    "format": "1600x900 Bgra8UnormSrgb"
+  },
+  "ipc": [
+    {
+      "label": "1080p RGBA",
+      "msPerFrame": 81.1,
+      "mbPerSec": 102,
+      "maxFpsByTransfer": 12.3
+    },
+    {
+      "label": "4K RGBA",
+      "msPerFrame": 329.6,
+      "mbPerSec": 101,
+      "maxFpsByTransfer": 3
+    }
+  ],
+  "nativeUpload1080p": {
+    "msPerFrame": 1.62,
+    "maxFps": 619
+  },
+  "match": {
+    "sameLength": true,
+    "maxChannelDiff": 1,
+    "pixelsOver1": 0,
+    "totalPixels": 921600,
+    "psnr": 89.1
+  },
+  "a": {
+    "info": "1920x1080 Bgra8Unorm",
+    "rows": [
+      {
+        "count": 1000,
+        "fps": 32.2,
+        "jsMsPerFrame": 0.32
+      },
+      {
+        "count": 4000,
+        "fps": 32,
+        "jsMsPerFrame": 0.3
+      },
+      {
+        "count": 16000,
+        "fps": 32,
+        "jsMsPerFrame": 0.29
+      },
+      {
+        "count": 64000,
+        "fps": 32,
+        "jsMsPerFrame": 0.3
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+/target/
+# wasm-bindgen が作る（cargo build と wasm-bindgen で作り直す）
+/native/ui/pkg/
+/native/gen/
