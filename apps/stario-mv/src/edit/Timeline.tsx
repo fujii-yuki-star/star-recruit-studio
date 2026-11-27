@@ -26,6 +26,10 @@ export interface TimelineProps {
   onTrial: (ops: Op[] | null) => void;
   /** 離した・確定した＝1つの取引。反映できたかを返す（断られたら帯を元に戻す）。 */
   onCommit: (ops: Op[]) => Promise<boolean> | void;
+  /** 素材の一覧から運んでいる途中か（MV-0008 決定4＝タイムラインへ落とすと、落とした時刻から置く）。 */
+  assetDragging?: boolean;
+  /** 素材を落とした時刻。 */
+  onDropAsset?: (frame: number) => void;
 }
 
 type Drag =
@@ -55,6 +59,14 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   // ⚠️ 状態を消すのに effect を使わない＝「どの並びを見ていたときの試しか」を持ち、並びが替われば使わない
   const [settling, setSettling] = useState<{ base: readonly Layer[]; ops: Op[] } | null>(null);
   const zoomAnchor = useRef<{ frame: number; offset: number } | null>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  // 素材を運んでいる間、落とす時刻（線で見せる）
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  /** 画面の横の位置 → タイムラインの時刻（目盛りの左端が 0）。 */
+  const frameAtClientX = (x: number): number => {
+    const left = ruler.current?.getBoundingClientRect().left ?? NAME_W;
+    return Math.max(0, xToFrame(x - left, ppf));
+  };
 
   // 開いたコンポジションは、欄の幅に全体が収まる大きさで始める
   useLayoutEffect(() => {
@@ -169,6 +181,10 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   };
 
   const onMove = (e: React.PointerEvent): void => {
+    if (props.assetDragging) {
+      setDropAt(frameAtClientX(e.clientX));
+      return;
+    }
     if (!drag) return;
     if (drag.kind === "order") {
       const to = Math.max(0, Math.min(layers.length - 1, drag.from + Math.round((e.clientY - drag.y0) / ROW_H)));
@@ -183,6 +199,11 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   };
 
   const onUp = (e: React.PointerEvent): void => {
+    if (props.assetDragging) {
+      setDropAt(null);
+      props.onDropAsset?.(frameAtClientX(e.clientX));
+      return;
+    }
     const d = drag;
     setDrag(null);
     if (!d) return;
@@ -222,6 +243,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerCancel={onUp}
+      onPointerLeave={() => setDropAt(null)}
     >
       <div className="tl-inner" style={{ width, height: RULER_H + layers.length * ROW_H }}>
         <div className="tl-ruler-row" style={{ height: RULER_H }}>
@@ -230,6 +252,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
           </div>
           <div
             className="tl-ruler"
+            ref={ruler}
             data-testid="ruler"
             onPointerDown={(e) => {
               if (e.button !== 0) return;
@@ -346,6 +369,9 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
           );
         })}
         <div className="tl-playhead" data-testid="playhead" style={{ left: NAME_W + head }} />
+        {props.assetDragging && dropAt != null && (
+          <div className="tl-drop" data-testid="drop-line" style={{ left: NAME_W + frameToX(dropAt, ppf) }} />
+        )}
       </div>
     </div>
   );

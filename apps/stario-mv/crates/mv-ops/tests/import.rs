@@ -606,3 +606,38 @@ fn 音の入っていない音の素材は取り込まない() {
         err.message
     );
 }
+
+/// MV-0008 決定2：利用者（アプリの画面）が選んだ素材は、許したフォルダの外でも取り込める。AI の口は今までどおり断る。
+#[test]
+fn 利用者の口は許したフォルダの外でも取り込める_ai_の口は断る() {
+    let e = env();
+    let outside = tempfile::tempdir().unwrap();
+    let far = outside.path().join("far.png");
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]))
+        .save(&far)
+        .unwrap();
+    let args = json!({ "project": p(&e.video), "ops": [{ "op": "importAsset", "path": p(&far) }] });
+    // AI の口（Ops::new）は断る
+    let mut ai = Ops::new(e.ops.settings.clone(), None);
+    let err = ai.call("applyTransaction", &args).unwrap_err();
+    assert!(
+        err.message.contains("許したフォルダの外"),
+        "{}",
+        err.message
+    );
+    // 利用者の口（Ops::for_user）は取り込む（写す＝プロジェクトの中に入る）
+    let mut user = Ops::for_user(e.ops.settings.clone());
+    let out = user.call("applyTransaction", &args).unwrap();
+    assert!(!out.is_error, "{}", out.json);
+    assert_eq!(out.json["applied"], true);
+    let id = out.json["created"][0]["id"].as_str().unwrap().to_string();
+    assert!(e.video.join("assets").join(&id).exists(), "写した");
+    // 書き出しの許しは緩めない（利用者の口でも、許したフォルダの外へは書き出さない＝取り込みだけの話）
+    let err = user
+        .call(
+            "exportVideo",
+            &json!({ "project": p(&e.video), "out": p(&outside.path().join("o.mp4")) }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "notAllowed");
+}

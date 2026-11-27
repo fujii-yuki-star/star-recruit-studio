@@ -510,3 +510,45 @@ fn プレビューへ写すと比を保って帯が付き色は変わらない()
     assert!(near(f.pixel(60, 90), [26, 26, 26, 255], 1), "下の帯");
     assert!(near(f.pixel(5, 60), [26, 26, 26, 255], 1), "欄の外");
 }
+
+/// 枠（MV-0008 決定6）＝描くときと同じ中身の大きさ・変形で、四隅をコンポジションの画素で返す。並びは先頭が最前面。
+#[test]
+fn 枠は描くときと同じ大きさと変形_見えないものとソロの外は入れない() {
+    let mut p = blank(WorkingColorSpace::Srgb);
+    let mut a = solid([1.0, 0.0, 0.0, 1.0], 50, 40);
+    a.transform.anchor = Animatable::vector(&[25.0, 20.0]);
+    a.transform.position = Animatable::vector(&[100.0, 50.0]);
+    a.transform.scale = Animatable::vector(&[2.0, 1.0]);
+    let mut b = solid([0.0, 1.0, 0.0, 1.0], 10, 10);
+    b.transform.position = Animatable::vector(&[5.0, 6.0]);
+    let mut hidden = solid([0.0, 0.0, 1.0, 1.0], 10, 10);
+    hidden.enabled = false;
+    let mut later = solid([0.0, 0.0, 1.0, 1.0], 10, 10);
+    later.in_frame = 10;
+    let mut clear = solid([0.0, 0.0, 1.0, 1.0], 10, 10);
+    clear.transform.opacity = Animatable::number(0.0);
+    let (ida, idb) = (a.id.clone(), b.id.clone());
+    p.compositions[0].layers = vec![a, b, hidden, later, clear];
+    let id = p.main_composition_id.clone();
+    let q = renderer().layer_quads(&p, &id, 0, Path::new(".")).unwrap();
+    assert_eq!(
+        q.iter().map(|x| x.layer_id.clone()).collect::<Vec<_>>(),
+        vec![ida.clone(), idb.clone()]
+    );
+    // 50×40 を横 2 倍・アンカーは中心 → (100,50) が中心の 100×40
+    let c = q[0].corners;
+    // ⚠️ 中身は縁をなめらかにする余白（数画素未満）を持つ＝描いた絵の外枠なので、その分だけ広くてよい
+    let close = |p: [f64; 2], e: [f64; 2]| (p[0] - e[0]).abs() <= 1.0 && (p[1] - e[1]).abs() <= 1.0;
+    assert!(
+        close(c[0], [50.0, 30.0]) && close(c[2], [150.0, 70.0]),
+        "{c:?}"
+    );
+    assert!(close(q[1].corners[0], [5.0, 6.0]) && close(q[1].corners[2], [15.0, 16.0]));
+    // ソロがあれば、ソロの外は入れない
+    p.compositions[0].layers[1].solo = Some(true);
+    let q = renderer().layer_quads(&p, &id, 0, Path::new(".")).unwrap();
+    assert_eq!(
+        q.iter().map(|x| x.layer_id.clone()).collect::<Vec<_>>(),
+        vec![idb]
+    );
+}

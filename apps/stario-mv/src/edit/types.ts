@@ -102,8 +102,20 @@ export interface Composition {
 
 export interface Asset {
   id: string;
-  kind: string;
+  kind: "video" | "image" | "imageSequence" | "svg" | "audio";
   name: string;
+  /** 中身の指紋（差し替わりの検知）。 */
+  sha256?: string;
+  /** 取り込み時に調べた情報。 */
+  meta?: {
+    width?: number;
+    height?: number;
+    durationSec?: number;
+    frameCount?: number;
+    fps?: { num: number; den: number };
+    hasAlpha?: boolean;
+    hasAudio?: boolean;
+  };
 }
 
 export interface ProjectDoc {
@@ -121,6 +133,8 @@ export interface EditDoc {
 
 /** 取引の中の1つの編集（`mv-operations.json` の `applyTransaction` の `ops`）。 */
 export type Op =
+  | { op: "addLayer"; layer: Record<string, unknown>; index?: number; compositionId?: string }
+  | { op: "importAsset"; path: string; mode?: "copy" | "reference"; name?: string }
   | { op: "updateLayer"; layerId: string; patch: Record<string, unknown> }
   | { op: "removeLayer"; layerId: string }
   | { op: "moveLayer"; layerId: string; index: number }

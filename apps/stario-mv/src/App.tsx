@@ -8,6 +8,10 @@ import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
 import { sequenceOps } from "./edit/layerOps";
 import { PropsPanel } from "./edit/PropsPanel";
+import { PreviewOverlay } from "./edit/PreviewOverlay";
+import { AssetsPanel } from "./edit/AssetsPanel";
+import { editApi } from "./edit/api";
+import type { Asset } from "./edit/types";
 import type { Op } from "./edit/types";
 import "./styles.css";
 
@@ -35,6 +39,15 @@ export function App(): React.JSX.Element {
   const [anchor, setAnchor] = useState<string | null>(null);
   // 吸着は既定で入（Premiere の型・MV-0008 決定4）
   const [snapping, setSnapping] = useState(true);
+  // 素材の一覧から運んでいる素材（タイムラインへ落とすと置く＝MV-0008 決定4・7）
+  const [dragAsset, setDragAsset] = useState<Asset | null>(null);
+  useEffect(() => {
+    if (!dragAsset) return;
+    // ⚠️ 落とす先がタイムラインでなくても、離したら運ぶのをやめる（タイムラインの受け取りのあとに来る）
+    const stop = (): void => setDragAsset(null);
+    window.addEventListener("pointerup", stop);
+    return () => window.removeEventListener("pointerup", stop);
+  }, [dragAsset]);
 
   const comp = project?.compositions.find((c) => c.id === compId) ?? null;
   const frame = status?.compositionId === compId ? status.frame : 0;
@@ -191,15 +204,18 @@ export function App(): React.JSX.Element {
 
       <main className="stage" style={{ gridTemplateColumns: `${sizes.left}px 5px 1fr 5px ${sizes.right}px` }}>
         <aside className="pane" aria-label="素材の一覧">
-          <h2>素材</h2>
-          {editor.doc && editor.doc.project.assets.length === 0 && <p className="muted">まだ素材がありません。</p>}
-          <ul className="assets">
-            {editor.doc?.project.assets.map((a) => (
-              <li key={a.id} title={a.id}>
-                <span className="kind">{a.kind}</span> {a.name}
-              </li>
-            ))}
-          </ul>
+          <AssetsPanel
+            assets={editor.doc?.project.assets ?? []}
+            disabled={!editComp}
+            onImport={() => {
+              void editApi.pickAssets().then((paths) => {
+                // ⚠️ commit も空の取引は送らない（二重の守り＝ここを外しても同じ結果・変異チェックで確かめた）
+                if (paths.length > 0) void commit(paths.map((path) => ({ op: "importAsset", path, mode: "copy" })));
+              });
+            }}
+            onDragStart={setDragAsset}
+            onPlace={(a) => void commit([placeAssetOp(a, frame, compId)])}
+          />
         </aside>
         <Splitter
           orientation="vertical"
@@ -209,6 +225,22 @@ export function App(): React.JSX.Element {
           onChange={(v) => setSize("left", v)}
         />
         <div className="preview" ref={panel} data-testid="preview-panel">
+          {editComp && (
+            <PreviewOverlay
+              panel={panel}
+              layers={editComp.layers}
+              selectedId={selectedLayer?.id ?? null}
+              frame={frame}
+              playing={playing}
+              docKey={editComp}
+              onSelect={(id) => {
+                setSelectedIds(id ? [id] : []);
+                setAnchor(id);
+              }}
+              onTrial={editor.trial}
+              onCommit={commit}
+            />
+          )}
           {!project && !openError && (
             <p className="hint">「動画を開く…」で、project.json のあるフォルダを選んでください。</p>
           )}
@@ -327,6 +359,10 @@ export function App(): React.JSX.Element {
             onSeek={(f) => void previewApi.seek(f)}
             onTrial={editor.trial}
             onCommit={commit}
+            assetDragging={dragAsset != null}
+            onDropAsset={(f) => {
+              if (dragAsset) void commit([placeAssetOp(dragAsset, f, compId)]);
+            }}
           />
         ) : (
           <p className="muted tl-empty">{project ? "読み込んでいます…" : ""}</p>
@@ -395,3 +431,14 @@ export function App(): React.JSX.Element {
     </div>
   );
 }
+
+/** 素材をタイムラインへ置く取引（`frame` から始まり、いちばん手前に＝AE の型・MV-0008 決定4・7）。 */
+export function placeAssetOp(a: Asset, frame: number, compositionId: string): Op {
+  return {
+    op: "addLayer",
+    compositionId,
+    index: 0,
+    layer: { name: a.name, assetId: a.id, inFrame: Math.max(0, frame) },
+  };
+}
+

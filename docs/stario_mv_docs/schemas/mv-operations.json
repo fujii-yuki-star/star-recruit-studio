@@ -95,7 +95,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["op", "layer"],
-                "description": "レイヤーを足す。layer には少なくとも name と、type と種類ごとの中身（text / shape / solid）か、素材の assetId（type は省ける＝映像・連番→video・画像・SVG→image・音→audio）を書く。書かなかった項目は既定（有効・長さはコンポジションの全体〔映像・連番・音は素材の長さまで〕・位置は中心・アンカーは単色と素材なら中身の中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
+                "description": "レイヤーを足す。layer には少なくとも name と、type と種類ごとの中身（text / shape / solid）か、素材の assetId（type は省ける＝映像・連番→video・画像・SVG→image・音→audio）を書く。書かなかった項目は既定（有効・長さはコンポジションの全体〔映像・連番・音は素材の長さまで〕・layer に inFrame を書けばそこから始まり、素材の時刻 0〔startFrame〕もそこ・終わりは素材の長さの分だけ後〔コンポジションの終わりで止める〕・位置は中心・アンカーは単色と素材なら中身の中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
                 "properties": {
                   "op": { "const": "addLayer" },
                   "compositionId": { "type": "string", "description": "省略時は mainCompositionId。" },

@@ -21,6 +21,8 @@ export const editApi = {
     invoke("edit_apply", { dir, ops, baseRevision }),
   /** 掴んで動かしている途中の見え方（保存しない）。`null` でやめる。 */
   trial: (ops: Op[] | null): Promise<void> => invoke("edit_trial", { ops }),
+  /** 取り込む素材のファイルを選ぶ（利用者が選ぶ＝許したフォルダの外でも取り込める）。選ばなければ空。 */
+  pickAssets: (): Promise<string[]> => invoke("pick_asset_files"),
   /** レイヤーの動かせる値の、そのフレームでの値（描画の核と同じ計算）。`{ "/transform/position": [x, y], … }`。 */
   eval: (layer: Layer, frame: number): Promise<Record<string, AnimValue>> => invoke("edit_eval", { layer, frame }),
 };
