@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AnimValue, EditDoc, Layer, Op } from "./types";
 
+/** 戻せる取引・やり直せる取引の名前（MV-0009）。 */
+export interface HistoryStatus {
+  undo: string | null;
+  redo: string | null;
+}
+
 /** 反映の結果（`applyTransaction` の結果＋当て直したか＝Rust の `edit::apply`）。 */
 export interface ApplyResult {
   applied: boolean;
@@ -21,6 +27,13 @@ export const editApi = {
     invoke("edit_apply", { dir, ops, baseRevision }),
   /** 掴んで動かしている途中の見え方（保存しない）。`null` でやめる。 */
   trial: (ops: Op[] | null): Promise<void> => invoke("edit_trial", { ops }),
+  /** 元に戻す・やり直す（MV-0009）。戻せなければ理由の文で失敗する。 */
+  undo: (dir: string): Promise<unknown> => invoke("edit_undo", { dir }),
+  redo: (dir: string): Promise<unknown> => invoke("edit_redo", { dir }),
+  /** 戻せる取引・やり直せる取引の名前（無ければ null）。 */
+  history: (dir: string): Promise<HistoryStatus> => invoke("edit_history", { dir }),
+  /** project.json が読めないとき、履歴の最後の中身から開き直す（MV-0009 決定5）。 */
+  recover: (dir: string): Promise<string> => invoke("edit_recover", { dir }),
   /** 取り込む素材のファイルを選ぶ（利用者が選ぶ＝許したフォルダの外でも取り込める）。選ばなければ空。 */
   pickAssets: (): Promise<string[]> => invoke("pick_asset_files"),
   /** レイヤーの動かせる値の、そのフレームでの値（描画の核と同じ計算）。`{ "/transform/position": [x, y], … }`。 */

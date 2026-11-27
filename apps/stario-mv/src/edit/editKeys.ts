@@ -20,7 +20,9 @@ export type EditKey =
   | "forward"
   | "backward"
   | "selectAll"
-  | "snap";
+  | "snap"
+  | "undo"
+  | "redo";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -30,6 +32,9 @@ export type EditKey =
 export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): EditKey | null {
   const ctrl = e.ctrlKey || e.metaKey;
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  // 元に戻す＝Ctrl+Z・やり直す＝Ctrl+Shift+Z（AE の型）と Ctrl+Y（Windows の慣れ）＝MV-0009 決定6
+  if (ctrl && !e.altKey && k === "z") return e.shiftKey ? "redo" : "undo";
+  if (ctrl && !e.shiftKey && !e.altKey && k === "y") return "redo";
   if (ctrl && e.shiftKey && k === "d") return "split";
   if (ctrl && !e.shiftKey && k === "a") return "selectAll";
   if (ctrl && k === "]") return "forward";
@@ -47,7 +52,7 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
 
 /** 編集のキー → 取引の中身（選んでいるレイヤー・今の時刻）。 */
 export function editOps(
-  key: Exclude<EditKey, "selectAll" | "snap">,
+  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo">,
   comp: Composition,
   selected: ReadonlySet<string>,
   playhead: number,

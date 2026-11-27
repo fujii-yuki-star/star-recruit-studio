@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { editApi } from "./api";
+import { editApi, type HistoryStatus } from "./api";
 import type { EditDoc, Op } from "./types";
 
 /** 編集の状態（動画の全体と版・知らせ）と、取引を送る手続き（MV-0008 決定1・2）。 */
@@ -15,8 +15,15 @@ export interface Editor {
   trial: (ops: Op[] | null) => void;
   /** 読み直す（外の変更を受けたとき）。 */
   refresh: () => Promise<void>;
+  /** 戻せる取引・やり直せる取引の名前（MV-0009）。 */
+  history: HistoryStatus;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
   clearMessages: () => void;
 }
+
+/** 戻せるものもやり直せるものも無い。 */
+const NO_HISTORY: HistoryStatus = { undo: null, redo: null };
 
 export const REAPPLIED_NOTICE = "AI の変更のあとの中身に、同じ操作を当て直しました。";
 
@@ -25,6 +32,7 @@ export function useEditor(dir: string | null): Editor {
   const [loaded, setLoaded] = useState<{ dir: string; doc: EditDoc } | null>(null);
   const doc = loaded && loaded.dir === dir ? loaded.doc : null;
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryStatus>(NO_HISTORY);
   const [notice, setNotice] = useState<string | null>(null);
   // ⚠️ 版は最新を見る＝描き直しを待たずに続けて操作しても、前の取引の版で送らない
   const revision = useRef<string | null>(null);
@@ -35,6 +43,7 @@ export function useEditor(dir: string | null): Editor {
       const d = await editApi.read(dir);
       revision.current = d.revision;
       setLoaded({ dir, doc: d });
+      setHistory((await editApi.history(dir)) ?? NO_HISTORY);
     } catch (e) {
       setError(String(e));
     }
@@ -50,6 +59,9 @@ export function useEditor(dir: string | null): Editor {
         if (!alive) return;
         revision.current = d.revision;
         setLoaded({ dir, doc: d });
+        void editApi.history(dir).then((h) => {
+          if (alive) setHistory(h ?? NO_HISTORY);
+        });
       },
       (e: unknown) => {
         if (alive) setError(String(e));
@@ -78,6 +90,24 @@ export function useEditor(dir: string | null): Editor {
     [dir, refresh],
   );
 
+  // 元に戻す・やり直す（MV-0009 決定6）。断られたら理由を出す（何も変えていない）。
+  const stepHistory = useCallback(
+    async (undo: boolean): Promise<void> => {
+      if (!dir) return;
+      try {
+        await (undo ? editApi.undo(dir) : editApi.redo(dir));
+        setError(null);
+        setNotice(null);
+        await refresh();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [dir, refresh],
+  );
+  const undo = useCallback(() => stepHistory(true), [stepHistory]);
+  const redo = useCallback(() => stepHistory(false), [stepHistory]);
+
   const trial = useCallback((ops: Op[] | null) => {
     void editApi.trial(ops);
   }, []);
@@ -87,5 +117,5 @@ export function useEditor(dir: string | null): Editor {
     setNotice(null);
   }, []);
 
-  return { doc, error, notice, commit, trial, refresh, clearMessages };
+  return { doc, error, notice, commit, trial, refresh, clearMessages, history, undo, redo };
 }
