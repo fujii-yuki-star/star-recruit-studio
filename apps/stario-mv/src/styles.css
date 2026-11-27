@@ -600,4 +600,9 @@ input:focus-visible {
   border-style: dashed;
   border-color: var(--muted);
 }
+/* 入れ子（MV-0011） */
+.tl-bar.type-precomp {
+  background: #6b4a7a;
+  border-color: #a77ac0;
+}
 

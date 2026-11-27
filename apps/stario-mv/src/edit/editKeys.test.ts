@@ -16,6 +16,15 @@ describe("元に戻す・やり直すのキー（MV-0009 決定6）", () => {
   });
 });
 
+describe("プリコンポーズのキー（MV-0011 決定5）", () => {
+  it("Ctrl+Shift+C（Alt を伴えば何もしない・Ctrl+C は編集のキーでない）", () => {
+    expect(k("C", { ctrlKey: true, shiftKey: true })).toBe("precompose");
+    expect(k("c", { ctrlKey: true, shiftKey: true })).toBe("precompose");
+    expect(k("c", { ctrlKey: true, shiftKey: true, altKey: true })).toBeNull();
+    expect(k("c", { ctrlKey: true })).toBeNull();
+  });
+});
+
 describe("編集のキー（MV-0008 決定4・AE の型）", () => {
   it("[ ] は動かす・Alt+[ ] は切る・Ctrl+] [ は重なりの順", () => {
     expect(k("[")).toBe("moveIn");

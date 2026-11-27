@@ -22,7 +22,8 @@ export type EditKey =
   | "selectAll"
   | "snap"
   | "undo"
-  | "redo";
+  | "redo"
+  | "precompose";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -36,6 +37,8 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (ctrl && !e.altKey && k === "z") return e.shiftKey ? "redo" : "undo";
   if (ctrl && !e.shiftKey && !e.altKey && k === "y") return "redo";
   if (ctrl && e.shiftKey && k === "d") return "split";
+  // プリコンポーズ＝Ctrl+Shift+C（AE と同じ・MV-0011 決定5）
+  if (ctrl && e.shiftKey && !e.altKey && k === "c") return "precompose";
   if (ctrl && !e.shiftKey && k === "a") return "selectAll";
   if (ctrl && k === "]") return "forward";
   if (ctrl && k === "[") return "backward";
@@ -52,7 +55,7 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
 
 /** 編集のキー → 取引の中身（選んでいるレイヤー・今の時刻）。 */
 export function editOps(
-  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo">,
+  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose">,
   comp: Composition,
   selected: ReadonlySet<string>,
   playhead: number,

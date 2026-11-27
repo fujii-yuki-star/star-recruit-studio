@@ -37,6 +37,8 @@ export interface TimelineProps {
   onTrial: (ops: Op[] | null) => void;
   /** 離した・確定した＝1つの取引。反映できたかを返す（断られたら帯を元に戻す）。 */
   onCommit: (ops: Op[]) => Promise<boolean> | void;
+  /** 入れ子の帯をダブルクリック＝その中を開く（MV-0011 決定5）。 */
+  onOpenNested?: (compositionId: string) => void;
   /** 素材の一覧から運んでいる途中か（MV-0008 決定4＝タイムラインへ落とすと、落とした時刻から置く）。 */
   assetDragging?: boolean;
   /** 素材を落とした時刻。 */
@@ -383,7 +385,14 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                   data-testid={`bar-${l.id}`}
                   style={{ left: frameToX(l.inFrame, ppf), width: Math.max(2, frameToX(l.outFrame - l.inFrame, ppf)) }}
                   onPointerDown={(e) => startBar(e, l)}
-                  title={`${l.name}（${l.inFrame}〜${l.outFrame - 1}）`}
+                  onDoubleClick={() => {
+                    if (l.type === "precomp" && l.compositionId) props.onOpenNested?.(l.compositionId);
+                  }}
+                  title={
+                    l.type === "precomp"
+                      ? `${l.name}（${l.inFrame}〜${l.outFrame - 1}）＝ダブルクリックで中を開く`
+                      : `${l.name}（${l.inFrame}〜${l.outFrame - 1}）`
+                  }
                 />
                 {/* キーのある時刻（掴んで動かすのは γ0.2＝MV-0008 決定5） */}
                 {keyFramesOf(l).map((f) => (
