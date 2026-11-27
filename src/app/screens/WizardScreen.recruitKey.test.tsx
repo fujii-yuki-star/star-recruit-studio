@@ -51,11 +51,20 @@ describe("鍵が無い（ADR-0076 決定2）", () => {
     expect(visibleText()).not.toContain("種類");
   });
 
+  // 種類の書かれていない作業状態でも一般で始める（到達しない前提に頼らない＝変異チェックで生き残った分）。
+  it("種類の無い作業状態で開いても、一般で始まり採用のカードは出ない", () => {
+    useProjectStore.setState((st) => ({ meta: { ...st.meta, videoKind: undefined } }));
+    render(<WizardScreen onNavigate={() => {}} />);
+    expect(kindGroup()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    expect(screen.getByLabelText(/テーマ・タイトル/)).toBeTruthy();
+  });
+
   // ⚠️ 画面まるごと・全部の段で探す（ADR-0076 決定6・CLAUDE.md §7）。
   it("一般の新しい動画では、どの段にも採用の言葉が出ない（画面まるごと）", () => {
     render(<WizardScreen onNavigate={() => {}} />);
     const seen: string[] = [];
-    for (let step = WIZARD_STEP.kind; step <= WIZARD_STEP.ready; step += 1) {
+    for (let step: number = WIZARD_STEP.kind; step <= WIZARD_STEP.ready; step += 1) {
       const text = visibleText();
       seen.push(text);
       for (const w of RECRUIT_WORDS) expect(text.includes(w), `段 ${step} に「${w}」が出ている`).toBe(false);

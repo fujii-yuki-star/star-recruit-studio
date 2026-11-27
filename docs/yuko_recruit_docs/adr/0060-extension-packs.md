@@ -134,7 +134,7 @@
 
 - 鍵は2つになる＝`personalized-briefing`（あなた向け会社説明・ADR-0061）と **`recruit-video`（採用動画・ADR-0076）**。
 - 2つは**別の鍵**。β のパックには両方を入れて配る（将来、採用動画だけのパックも作れる）。
-- `features` は形（`pattern`）なので schema は変わらない。アプリ側の `KNOWN_PACK_FEATURES` に足す。
+- `features` は形（`pattern`）なので schema は変わらない。アプリ側の `KNOWN_PACK_FEATURES` に足す（2026-11-27 実装・β のパックは 1.1.0 で鍵2つ）。
 
 ## 未解決の論点
 
