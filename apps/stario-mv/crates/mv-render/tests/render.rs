@@ -926,3 +926,71 @@ fn 入れ子もその変形でぼける() {
         }
     }
 }
+
+/// 平均した絵には、描画モードを1回だけ・色を直さずに掛ける＝動きの真ん中（全部の時刻で覆う所）は、ぼかさずに描いたのと同じ色。
+/// ⚠️ 0 と 1 でない色・灰色の背景で（純色・黒だと描画モードや色の二重の直しが見えない＝変異チェックで生き残った）。
+#[test]
+fn ぼかしても真ん中は描画モードどおりの同じ色() {
+    for space in [WorkingColorSpace::Linear, WorkingColorSpace::Srgb] {
+        for mode in [BlendMode::Normal, BlendMode::Multiply] {
+            let mut p = moving(space, true, true);
+            p.compositions[0].background = [0.5, 0.5, 0.5, 1.0];
+            let l = &mut p.compositions[0].layers[0];
+            l.solid.as_mut().unwrap().color = [1.0, 0.5, 0.2, 1.0];
+            l.blend_mode = mode;
+            let blurred = render(&p, 2).unwrap().pixel(100, 50);
+            p.compositions[0].layers[0].motion_blur = Some(false);
+            let still = render(&p, 2).unwrap().pixel(100, 50);
+            assert!(
+                near(blurred, still, 2),
+                "{space:?} {mode:?} ぼかす {blurred:?} ぼかさない {still:?}"
+            );
+        }
+    }
+}
+
+/// 不透明度も時刻ごと（AE と同じ）＝動かずに不透明度だけ変わってもぼかしの計算に入る。直線なら平均＝そのコマの値。
+#[test]
+fn 不透明度は時刻ごとに掛ける() {
+    let mut p = moving(WorkingColorSpace::Srgb, true, true);
+    let l = &mut p.compositions[0].layers[0];
+    l.transform.position = Animatable::vector(&[100.0, 50.0]);
+    l.transform.opacity = Animatable {
+        keyframes: Some(vec![lin(0, 0.0), lin(4, 1.0)]),
+        ..Default::default()
+    };
+    let blurred = render(&p, 2).unwrap().pixel(100, 50);
+    p.compositions[0].layers[0].motion_blur = Some(false);
+    let still = render(&p, 2).unwrap().pixel(100, 50);
+    assert!(
+        near(blurred, still, 2),
+        "ぼかす {blurred:?} ぼかさない {still:?}"
+    );
+    assert!((100..160).contains(&still[0]), "半分の不透明度: {still:?}");
+}
+
+/// 重ねる時刻のどれかで大きさが 0 でも止まらない（その時刻は何も写らない）。
+#[test]
+fn 大きさが_0_になる時刻があっても描ける() {
+    let mut p = moving(WorkingColorSpace::Srgb, true, true);
+    let mb = p.compositions[0].motion_blur.as_mut().unwrap();
+    mb.shutter_angle = Some(720.0);
+    mb.shutter_phase = Some(0.0);
+    let hold = |frame, v: f64| Keyframe {
+        frame,
+        value: AnimValue::Vector(vec![v, v]),
+        interpolation: Interpolation::Hold,
+        ease_out: None,
+        ease_in: None,
+        spatial_out: None,
+        spatial_in: None,
+    };
+    // 1 フレーム目から 2 コマぶん重ねる＝2 フレーム目からは大きさ 0
+    p.compositions[0].layers[0].transform.scale = Animatable {
+        keyframes: Some(vec![hold(0, 1.0), hold(2, 0.0)]),
+        ..Default::default()
+    };
+    let f = render(&p, 1).expect("大きさ 0 の時刻があっても描ける");
+    let c = f.pixel(100, 50);
+    assert!(c[0] > 10 && c[0] < 250, "一部の時刻だけ写る: {c:?}");
+}
