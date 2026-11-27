@@ -1060,6 +1060,14 @@ fn プリコンポーズの親子と入れ子の既定() {
     let (doc, _) = read_doc(&dir).unwrap();
     let inner = &doc["compositions"][1];
     assert_eq!(inner["layers"][0]["parentId"], Value::Null);
+    // 入れ子は、選んだうちいちばん手前の位置（見出しの所＝背景より手前）
+    let outer: Vec<&str> = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(outer, ["precomp", "solid"]);
     assert_eq!(inner["name"], "入れ子");
     // 外に残した子の親を中へ移す場合も切る
     let (_r2, dir2) = sample();

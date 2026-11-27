@@ -625,7 +625,8 @@ fn 入れ子は中を透明な地で描き中の時刻で重ねる() {
         inner.height = 20;
         inner.duration_frames = 20;
         inner.background = [0.0, 1.0, 0.0, 1.0];
-        let mut red = solid([1.0, 0.0, 0.0, 1.0], 40, 20);
+        // ⚠️ 0 と 1 でない色にする＝純色だと色の直し方を二重にしても同じ値で、取り違えが見えない（変異チェックで生き残った）
+        let mut red = solid([1.0, 0.5, 0.2, 1.0], 40, 20);
         red.in_frame = 10;
         red.out_frame = 20;
         red.transform.opacity = Animatable::number(0.5);
