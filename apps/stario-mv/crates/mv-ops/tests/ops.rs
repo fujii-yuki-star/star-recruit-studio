@@ -707,6 +707,9 @@ fn 画面と_ai_の取引を1本の履歴で戻してやり直す() {
     assert_eq!(out.json["history"]["undo"], "画面：レイヤーを直す");
     let undo = |o: &mut Ops| o.call("undo", &json!({ "project": p(&dir) }));
     let redo = |o: &mut Ops| o.call("redo", &json!({ "project": p(&dir) }));
+    // ⚠️ 秒をまたがせる＝戻すと反映した時刻が書き換わる。同じ秒の中だと中身が偶然そろい、
+    //   「取引ごとの版と比べる」作りの不具合（続けて戻せない）を見逃す（実際に通ったり落ちたりした）
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     // 画面の取引を戻す（AI の口からでも同じ1本）
     let u = undo(&mut ai).unwrap();
     assert_eq!(u.json["undone"], "画面：レイヤーを直す");
@@ -733,8 +736,14 @@ fn 画面と_ai_の取引を1本の履歴で戻してやり直す() {
     // 戻したあとに新しい取引を反映すると、やり直しの分は消える
     tx(&mut user, &dir, set("新しい名前"));
     assert_eq!(redo(&mut user).unwrap_err().code, "nothingToRedo");
-    // 戻したものはファイルにも残る（閉じても戻せる＝history/）
+    // 戻したものはファイルにも残る（閉じても戻せる＝history/）・誰の取引かも覚える
     assert!(dir.join("history").join("index.json").exists());
+    let actors: Vec<String> = mv_ops::history::load_index(&dir)
+        .entries
+        .iter()
+        .map(|e| e.actor.clone())
+        .collect();
+    assert_eq!(actors, ["ai", "user"]);
 }
 
 /// MV-0009 決定3：履歴の外で動画が変わっていたら、上書きせずに断る。試しと断られた取引は積まない。

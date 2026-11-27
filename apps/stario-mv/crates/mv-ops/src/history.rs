@@ -3,6 +3,8 @@
 //! - 1つの取引＝1つの履歴（その前と後の中身＝`project.json` の全体）。戻すのは新しい順に1つずつ。
 //! - 戻したあとに新しい取引を積んだら、やり直しの分は捨てる。最大 [`MAX_HISTORY`] 回分。
 //! - ⚠️ **黙って別の結果にしない**：戻す・やり直す前に、今の中身が履歴の覚えている版かを確かめる（[`HistoryError::Mismatch`]）。
+//!   覚えるのは**今の中身の版1つ**（積む・戻す・やり直す・開き直すたびに書き換える）。⚠️ 取引ごとに版を覚えると、
+//!   戻すときに書いた中身（反映した時刻が変わる）と食い違い、続けて戻せなくなる（同じ秒の中だけ通る＝実際に踏んだ）。
 //! - 素材のファイルは履歴に入れない（取り込みを戻しても `assets/` のファイルは消さない＝ADR-0074 C-4）。
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,9 @@ pub struct Index {
     /// これより前（`entries[..cursor]`）が戻せる・これ以後がやり直せる。
     pub cursor: usize,
     pub next_id: u64,
+    /// 履歴が最後に書いた（＝今あるはずの）中身の版。違えば、履歴の外で動画が変わっている。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_revision: Option<String>,
     pub entries: Vec<Entry>,
 }
 
@@ -35,11 +40,6 @@ pub struct Entry {
     pub actor: String,
     /// 「画面：レイヤーを直す」のような名前。
     pub label: String,
-    /// その取引の「後」の中身を書いたときの版（戻す前に今の版と比べる）。
-    pub after_revision: String,
-    /// 戻して「前」の中身を書いたときの版（やり直す前に今の版と比べる）。まだ戻していなければ無い。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before_revision: Option<String>,
 }
 
 /// 戻す・やり直すができない理由。
@@ -117,9 +117,8 @@ pub fn record(
         at: at.into(),
         actor: actor.into(),
         label: label.into(),
-        after_revision: after_revision.into(),
-        before_revision: None,
     });
+    idx.current_revision = Some(after_revision.into());
     idx.next_id = id + 1;
     while idx.entries.len() > MAX_HISTORY {
         let old = idx.entries.remove(0);
@@ -148,21 +147,20 @@ pub fn target(
     current_revision: &str,
 ) -> Result<(Entry, Value), HistoryError> {
     let idx = load_index(project);
-    let (e, key, expected) = match step {
-        Step::Undo => {
-            let e = idx
-                .cursor
+    let (e, key) = match step {
+        Step::Undo => (
+            idx.cursor
                 .checked_sub(1)
                 .and_then(|i| idx.entries.get(i))
-                .ok_or(HistoryError::Nothing)?;
-            (e, "before", Some(e.after_revision.as_str()))
-        }
-        Step::Redo => {
-            let e = idx.entries.get(idx.cursor).ok_or(HistoryError::Nothing)?;
-            (e, "after", e.before_revision.as_deref())
-        }
+                .ok_or(HistoryError::Nothing)?,
+            "before",
+        ),
+        Step::Redo => (
+            idx.entries.get(idx.cursor).ok_or(HistoryError::Nothing)?,
+            "after",
+        ),
     };
-    if expected != Some(current_revision) {
+    if idx.current_revision.as_deref() != Some(current_revision) {
         return Err(HistoryError::Mismatch);
     }
     let bytes =
@@ -180,19 +178,17 @@ pub fn target(
 pub fn commit_step(project: &Path, step: Step, new_revision: &str) -> io::Result<()> {
     let mut idx = load_index(project);
     match step {
-        Step::Undo => {
-            if let Some(i) = idx.cursor.checked_sub(1) {
-                idx.entries[i].before_revision = Some(new_revision.into());
-                idx.cursor = i;
-            }
-        }
-        Step::Redo => {
-            if let Some(e) = idx.entries.get_mut(idx.cursor) {
-                e.after_revision = new_revision.into();
-                idx.cursor += 1;
-            }
-        }
+        Step::Undo => idx.cursor = idx.cursor.saturating_sub(1),
+        Step::Redo => idx.cursor = (idx.cursor + 1).min(idx.entries.len()),
     }
+    idx.current_revision = Some(new_revision.into());
+    save_index(project, &idx)
+}
+
+/// 今の中身の版を覚え直す（履歴の最後の中身から開き直したとき）。
+pub fn set_current(project: &Path, revision: &str) -> io::Result<()> {
+    let mut idx = load_index(project);
+    idx.current_revision = Some(revision.into());
     save_index(project, &idx)
 }
 
@@ -254,14 +250,19 @@ mod tests {
         assert_eq!((e.label.as_str(), d1), ("AI：二", doc(1)));
         commit_step(p, Step::Undo, "u1").unwrap();
         assert_eq!(status(p), (Some("画面：一".into()), Some("AI：二".into())));
-        // やり直すには、戻したときに書いた版であること
+        // 戻したあとは、戻して書いた版から続けて戻せる・やり直せる（戻す前の版では断る）
         assert_eq!(target(p, Step::Redo, "r2"), Err(HistoryError::Mismatch));
+        assert_eq!(target(p, Step::Undo, "u1").unwrap().1, doc(0));
         assert_eq!(target(p, Step::Redo, "u1").unwrap().1, doc(2));
         commit_step(p, Step::Redo, "r2b").unwrap();
         assert_eq!(status(p), (Some("AI：二".into()), None));
         assert_eq!(target(p, Step::Redo, "r2b"), Err(HistoryError::Nothing));
         // やり直したあとは、やり直して書いた版から戻せる
         assert_eq!(target(p, Step::Undo, "r2b").unwrap().1, doc(1));
+        // 開き直したら、その版を覚え直す
+        set_current(p, "rec").unwrap();
+        assert_eq!(target(p, Step::Undo, "r2b"), Err(HistoryError::Mismatch));
+        assert_eq!(target(p, Step::Undo, "rec").unwrap().1, doc(1));
     }
 
     #[test]

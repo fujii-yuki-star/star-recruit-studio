@@ -695,7 +695,11 @@ pub fn recover_from_history(dir: &Path) -> Result<String, OpError> {
     };
     mv_core::io::save_project(dir, &p)
         .map_err(|e| OpError::new("io", format!("保存できませんでした（{e}）。")))?;
-    Ok(read_doc(dir)?.1)
+    let rev = read_doc(dir)?.1;
+    // 開き直した中身の版を覚え直す＝そのまま戻せる
+    history::set_current(dir, &rev)
+        .map_err(|e| OpError::new("io", format!("履歴を書けませんでした（{e}）。")))?;
+    Ok(rev)
 }
 
 /// 動画のフォルダから JSON と版（中身の SHA-256）を読む。
