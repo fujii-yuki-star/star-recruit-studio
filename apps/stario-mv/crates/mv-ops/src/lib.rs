@@ -434,7 +434,7 @@ impl Ops {
             op[tx::RESOLVED_ASSET] = plan.asset;
         }
         let mut after = before.clone();
-        let created = tx::apply_ops(&mut after, &ops).map_err(|f| {
+        let created = tx::apply_ops_warn(&mut after, &ops, &mut warnings).map_err(|f| {
             let name = ops[f.index]["op"].as_str().unwrap_or("?").to_string();
             OpError::new(
                 "opFailed",

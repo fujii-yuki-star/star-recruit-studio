@@ -364,6 +364,17 @@ export function App(): React.JSX.Element {
           </button>
           <button
             type="button"
+            disabled={!editComp}
+            onClick={() =>
+              editComp &&
+              commit([{ op: "addLayer", compositionId: editComp.id, index: 0, layer: { name: "ヌル", type: "null" } }])
+            }
+            title="ヌル（描かれない入れ物）を、いちばん手前に足す＝親にして、まとめて動かすため"
+          >
+            ヌルを足す
+          </button>
+          <button
+            type="button"
             disabled={!editComp || selected.size < 2}
             onClick={() => editComp && commit(sequenceOps(editComp, selected))}
             title="選んだレイヤーを、時間の順に隙間なく並べ直す"

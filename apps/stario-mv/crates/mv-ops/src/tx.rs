@@ -21,6 +21,7 @@ pub const TX_OPS: &[&str] = &[
     "removeLayer",
     "moveLayer",
     "splitLayer",
+    "setParent",
     "addComposition",
     "updateComposition",
     "removeComposition",
@@ -43,6 +44,15 @@ pub struct Created {
 
 /// `ops` を順に当てる。1つでも当てられなければ、そこで止めて理由を返す（写しは捨てる前提）。
 pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailure> {
+    apply_ops_warn(doc, ops, &mut Vec::new())
+}
+
+/// [`apply_ops`] と同じ。当てられたが知らせたいこと（見た目を保てなかった など）を `warnings` に足す。
+pub fn apply_ops_warn(
+    doc: &mut Value,
+    ops: &[Value],
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Created>, OpFailure> {
     let mut created = Vec::new();
     for (index, op) in ops.iter().enumerate() {
         let fail = |message: String| OpFailure { index, message };
@@ -149,6 +159,62 @@ pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailu
                     id: new_layer_id,
                 });
             }
+            "setParent" => {
+                // 親を付ける・外す（MV-0010 決定5）。既定は見た目を保つ（AE で親を選んだときと同じ）
+                let id = str_arg(op, "layerId");
+                let (ci, li) = find_layer(doc, id).ok_or_else(|| fail(layer_missing(id)))?;
+                let parent = op
+                    .get("parentId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                if let Some(pid) = &parent {
+                    if pid == id {
+                        return Err(fail("自分自身を親にはできません。".into()));
+                    }
+                    let layers = doc["compositions"][ci]["layers"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    if !layers.iter().any(|l| l["id"].as_str() == Some(pid)) {
+                        return Err(fail(format!(
+                            "親のレイヤー {pid} が同じコンポジションに見つかりません（親は同じコンポジションのレイヤーだけ）。"
+                        )));
+                    }
+                    // 親の親をたどって自分に戻るなら循環
+                    let mut cur = Some(pid.clone());
+                    for _ in 0..=layers.len() {
+                        let Some(c) = cur else { break };
+                        if c == id {
+                            return Err(fail(format!(
+                                "{pid} を親にすると、親子が輪になります（{pid} の親をたどると {id} に戻る）。"
+                            )));
+                        }
+                        cur = layers
+                            .iter()
+                            .find(|l| l["id"].as_str() == Some(c.as_str()))
+                            .and_then(|l| l["parentId"].as_str())
+                            .map(str::to_string);
+                    }
+                }
+                let keep = op.get("keepAppearance").and_then(Value::as_bool) != Some(false);
+                if keep {
+                    let frame = op.get("frame").and_then(Value::as_i64).unwrap_or(0);
+                    if let Some((patch, warn)) =
+                        keep_appearance(&doc["compositions"][ci], id, parent.as_deref(), frame)
+                            .map_err(&fail)?
+                    {
+                        merge_patch(&mut doc["compositions"][ci]["layers"][li], &patch);
+                        warnings.extend(warn);
+                    } else {
+                        warnings.push(format!(
+                            "「{}」の位置・大きさ・回転のどれかがキーフレームか式なので、見た目を保たずに親を付け替えました（親の変形がそのまま掛かります）。",
+                            doc["compositions"][ci]["layers"][li]["name"].as_str().unwrap_or(id)
+                        ));
+                    }
+                }
+                doc["compositions"][ci]["layers"][li]["parentId"] =
+                    parent.map_or(Value::Null, Value::String);
+            }
             "addComposition" => {
                 let Some(Value::Object(src)) = op.get("composition") else {
                     return Err(fail(
@@ -247,6 +313,69 @@ pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailu
         }
     }
     Ok(created)
+}
+
+/// 見た目を保って親を付け替えるための、子の変形の差分（MV-0010 決定5）。
+/// `None`＝子の位置・大きさ・回転が動く（キーフレーム・式）ので保てない。2つ目の値＝知らせること（ゆがみを近い形にした）。
+fn keep_appearance(
+    comp: &Value,
+    id: &str,
+    parent: Option<&str>,
+    frame: i64,
+) -> Result<Option<(Value, Vec<String>)>, String> {
+    use mv_core::eval::{apply, invert, mul, world_matrix, IDENTITY};
+    let c: mv_core::model::Composition = serde_json::from_value(comp.clone()).map_err(|e| {
+        format!("コンポジションが形に入らないので、見た目を保てません（{e}）。keepAppearance: false で付けるか、先に形を直してください。")
+    })?;
+    let child = c
+        .layers
+        .iter()
+        .find(|l| l.id == id)
+        .ok_or_else(|| layer_missing(id))?;
+    let t = &child.transform;
+    let moving = |a: &mv_core::model::Animatable| a.value.is_none();
+    if moving(&t.position) || moving(&t.scale) || moving(&t.rotation) || moving(&t.anchor) {
+        return Ok(None);
+    }
+    let f = frame as f64;
+    let world = world_matrix(&c, child, f).map_err(|e| format!("値を求められません（{e:?}）。"))?;
+    let p = match parent.and_then(|pid| c.layers.iter().find(|l| l.id == pid)) {
+        Some(pl) => {
+            world_matrix(&c, pl, f).map_err(|e| format!("値を求められません（{e:?}）。"))?
+        }
+        None => IDENTITY,
+    };
+    let inv = invert(p).ok_or(
+        "親の大きさが 0 なので、見た目を保てません。keepAppearance: false で付けてください。",
+    )?;
+    let m = mul(inv, world);
+    let anchor = mv_core::eval::vec_at::<2>(&t.anchor, f)
+        .map_err(|e| format!("値を求められません（{e:?}）。"))?;
+    let (a, b, cc, d) = (m[0], m[1], m[2], m[3]);
+    let sx = a.hypot(b);
+    if sx < 1e-12 {
+        return Err("大きさが 0 なので、見た目を保てません。".into());
+    }
+    let sy = (a * d - b * cc) / sx;
+    let rot = b.atan2(a).to_degrees();
+    let pos = apply(m, anchor);
+    let mut warn = Vec::new();
+    // 2つの軸が直角でない＝ゆがみ（親の大きさが縦横で違い、回転もしている）
+    if (a * cc + b * d).abs() > 1e-6 * sx * sy.abs().max(1e-12) {
+        warn.push(format!(
+            "「{}」は親の縦横の大きさの違いと回転のため、見た目を傾き（ゆがみ）なしには保てません。いちばん近い位置・大きさ・回転にしました。",
+            child.name
+        ));
+    }
+    let r = |x: f64| (x * 1e6).round() / 1e6;
+    Ok(Some((
+        json!({ "transform": {
+            "position": { "value": [r(pos[0]), r(pos[1])] },
+            "scale": { "value": [r(sx), r(sy)] },
+            "rotation": { "value": r(rot) },
+        }}),
+        warn,
+    )))
 }
 
 /// JSON Merge Patch（RFC 7386）。

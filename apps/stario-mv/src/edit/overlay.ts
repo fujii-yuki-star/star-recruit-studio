@@ -11,7 +11,12 @@ export interface Bounds {
   /** コンポジションの 1 画素が、窓の何画素（物理）か。 */
   scale: number;
   /** 先頭が最前面。 */
-  layers: { layerId: string; corners: [Point, Point, Point, Point] }[];
+  layers: {
+    layerId: string;
+    corners: [Point, Point, Point, Point];
+    /** 親の変形の向きと大きさ [a, b, c, d]（親が無ければ単位）＝掴んだ量を位置の差へ戻す（MV-0010 決定5）。 */
+    parentLinear?: [number, number, number, number];
+  }[];
 }
 
 /** 窓の画素（物理）→ 欄の中の CSS 画素。 */
@@ -62,6 +67,18 @@ export function dragDelta(dxCss: number, dyCss: number, dpr: number, scale: numb
     else dx = 0;
   }
   return [dx, dy];
+}
+
+/**
+ * コンポジションの画素の差 → 親の座標の差（位置は親の座標で書く＝親の向きと大きさの逆を通す・MV-0010 決定5）。
+ * 親が無い・大きさが 0 なら、そのまま（0 なら動かさない）。
+ */
+export function toParentDelta(d: Point, parentLinear: readonly number[] | undefined): Point {
+  if (!parentLinear) return d;
+  const [a, b, c, e] = parentLinear;
+  const det = a * e - b * c;
+  if (Math.abs(det) < 1e-12) return [0, 0];
+  return [(e * d[0] - c * d[1]) / det, (-b * d[0] + a * d[1]) / det];
 }
 
 /**

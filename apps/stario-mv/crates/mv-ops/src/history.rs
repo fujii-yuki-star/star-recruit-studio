@@ -213,6 +213,7 @@ pub fn label_of(ops: &[Value], user: bool) -> String {
             "removeLayer" => "レイヤーを消す",
             "moveLayer" => "重なりの順を変える",
             "splitLayer" => "レイヤーを分ける",
+            "setParent" => "親を付ける",
             "addComposition" => "コンポジションを足す",
             "updateComposition" => "コンポジションを直す",
             "removeComposition" => "コンポジションを外す",

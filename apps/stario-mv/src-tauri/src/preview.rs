@@ -515,6 +515,7 @@ pub fn bounds_json(
         "layers": quads.iter().map(|q| serde_json::json!({
             "layerId": q.layer_id,
             "corners": q.corners.map(|[x, y]| [origin[0] + x * scale, origin[1] + y * scale]),
+            "parentLinear": q.parent_linear,
         })).collect::<Vec<_>>(),
     })
 }
@@ -545,6 +546,7 @@ mod tests {
         let q = [mv_render::LayerQuad {
             layer_id: "lyr_A".into(),
             corners: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+            parent_linear: [2.0, 0.0, 0.0, 2.0],
         }];
         let v = bounds_json(&q, 2.0, [100.0, 50.0], 7);
         assert_eq!(v["frame"], 7);
@@ -553,6 +555,10 @@ mod tests {
         assert_eq!(
             v["layers"][0]["corners"],
             serde_json::json!([[100.0, 50.0], [120.0, 50.0], [120.0, 60.0], [100.0, 60.0]])
+        );
+        assert_eq!(
+            v["layers"][0]["parentLinear"],
+            serde_json::json!([2.0, 0.0, 0.0, 2.0])
         );
     }
 }

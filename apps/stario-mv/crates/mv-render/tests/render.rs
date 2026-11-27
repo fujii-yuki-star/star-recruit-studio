@@ -406,10 +406,11 @@ fn 画像を読む() {
 #[test]
 fn まだ描けないレイヤーは知らせる() {
     let mut p = blank(WorkingColorSpace::Srgb);
-    p.compositions[0].layers.push(base_layer(LayerType::Null));
+    // ⚠️ ヌルは γ0.2 で描けるようになった（MV-0010）＝まだ描けないカメラで確かめる
+    p.compositions[0].layers.push(base_layer(LayerType::Camera));
     match render(&p, 0) {
         Err(RenderError::NotYetSupported(m)) => {
-            assert!(m.contains("ヌルのレイヤー"), "種類は日本語の名前で: {m}")
+            assert!(m.contains("カメラのレイヤー"), "種類は日本語の名前で: {m}")
         }
         r => panic!("{:?}", r.map(|_| ())),
     }
@@ -550,5 +551,64 @@ fn 枠は描くときと同じ大きさと変形_見えないものとソロの�
     assert_eq!(
         q.iter().map(|x| x.layer_id.clone()).collect::<Vec<_>>(),
         vec![idb]
+    );
+}
+
+/// MV-0010 決定5：親の変形を子に掛ける・親の不透明度は引き継がない・ヌルは描かないが枠（100×100）は返す。
+#[test]
+fn 親の変形を子に掛け_ヌルは描かず枠だけ返す() {
+    let mut p = blank(WorkingColorSpace::Srgb);
+    let mut null = base_layer(LayerType::Null);
+    null.transform.position = Animatable::vector(&[100.0, 50.0]);
+    null.transform.scale = Animatable::vector(&[2.0, 2.0]);
+    // 親が透明でも、子は見える（不透明度は引き継がない）
+    null.transform.opacity = Animatable::number(0.0);
+    let mut child = solid([1.0, 0.0, 0.0, 1.0], 10, 10);
+    child.transform.position = Animatable::vector(&[5.0, 0.0]);
+    child.parent_id = Some(null.id.clone());
+    let (nid, cid) = (null.id.clone(), child.id.clone());
+    p.compositions[0].layers = vec![child, null];
+    let f = render(&p, 0).unwrap();
+    // 子は (100+5×2, 50) から 20×20 に描かれる
+    assert!(
+        near(f.pixel(120, 60), [255, 0, 0, 255], 1),
+        "{:?}",
+        f.pixel(120, 60)
+    );
+    assert!(
+        near(f.pixel(105, 60), [0, 0, 0, 255], 1),
+        "親の大きさで広がる前の所は背景"
+    );
+    // ヌルそのものは描かない（ヌルの枠の所＝子の外は背景）
+    assert!(near(f.pixel(190, 95), [0, 0, 0, 255], 1));
+    let id = p.main_composition_id.clone();
+    let q = renderer().layer_quads(&p, &id, 0, Path::new(".")).unwrap();
+    assert_eq!(
+        q.iter().map(|x| x.layer_id.clone()).collect::<Vec<_>>(),
+        vec![cid, nid]
+    );
+    // ⚠️ 縁の余白（中身の画素で1つ）は親の大きさ（2 倍）の分だけ広がる＝2 画素まで許す
+    let close = |a: [f64; 2], e: [f64; 2]| (a[0] - e[0]).abs() <= 2.0 && (a[1] - e[1]).abs() <= 2.0;
+    assert!(
+        close(q[0].corners[0], [110.0, 50.0]) && close(q[0].corners[2], [130.0, 70.0]),
+        "{:?}",
+        q[0].corners
+    );
+    assert_eq!(
+        q[0].parent_linear,
+        [2.0, 0.0, 0.0, 2.0],
+        "子は親の向きと大きさ"
+    );
+    // ヌルの枠＝100×100 を親（自分）の大きさで＝200×200
+    assert_eq!(q[1].corners[0], [100.0, 50.0]);
+    assert_eq!(q[1].corners[2], [300.0, 250.0]);
+    assert_eq!(q[1].parent_linear, [1.0, 0.0, 0.0, 1.0]);
+    // 不透明なヌルも描かない（不透明度 0 で先に抜ける道と別に確かめる）
+    p.compositions[0].layers[1].transform.opacity = Animatable::number(1.0);
+    let f = render(&p, 0).expect("ヌルは描けないレイヤーではない");
+    assert!(
+        near(f.pixel(190, 95), [0, 0, 0, 255], 1),
+        "{:?}",
+        f.pixel(190, 95)
     );
 }

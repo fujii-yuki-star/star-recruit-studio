@@ -79,7 +79,9 @@ export function useEditor(dir: string | null): Editor {
         const r = await editApi.apply(dir, ops, revision.current);
         revision.current = r.revision;
         setError(null);
-        setNotice(r.reapplied ? REAPPLIED_NOTICE : null);
+        // ⚠️ 反映したが知らせたいこと（見た目を保てなかった など）は必ず出す＝黙って別の見た目にしない
+        const notes = [...(r.reapplied ? [REAPPLIED_NOTICE] : []), ...(r.warnings ?? [])];
+        setNotice(notes.length > 0 ? notes.join(" ") : null);
         await refresh();
         return true;
       } catch (e) {

@@ -1,5 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { moveOps, rangeSelect, renameOp, reorderOps, toggleOp, trimInOps, trimOutOps, withTrial } from "./layerOps";
+import {
+  moveOps,
+  parentCandidates,
+  rangeSelect,
+  renameOp,
+  reorderOps,
+  setParentOp,
+  toggleOp,
+  trimInOps,
+  trimOutOps,
+  withTrial,
+} from "./layerOps";
 import { fitPxPerFrame, frameToX, snapOffset, snapTargets, xToFrame, zoomed } from "./timelineMath";
 import { keyFramesOf } from "./props";
 import type { Composition, Layer, Op } from "./types";
@@ -322,6 +333,26 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                 >
                   {l.locked ? "🔒" : "·"}
                 </button>
+                {/* 親（AE の「親」の列＝MV-0010 決定5）。付け替えても見た目は保つ */}
+                <select
+                  className="tl-parent"
+                  aria-label={`${l.name}の親`}
+                  title="親（付け替えても今の時刻の見た目は保つ）"
+                  value={l.parentId ?? ""}
+                  disabled={l.locked}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    const op = setParentOp(l, e.target.value || null, playhead);
+                    if (op) props.onCommit([op]);
+                  }}
+                >
+                  <option value="">親なし</option>
+                  {parentCandidates(comp, l.id).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
                 {renaming === l.id ? (
                   <input
                     className="tl-rename"

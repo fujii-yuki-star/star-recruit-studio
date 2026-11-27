@@ -177,19 +177,12 @@ fn 親が自分_見つからない_循環() {
     text_layer(&mut p).parent_id = Some(own);
     assert_eq!(
         codes(&p),
-        vec![
-            IssueCode::SelfReference,
-            IssueCode::NotYetSupported,
-            IssueCode::ParentCycle
-        ]
+        vec![IssueCode::SelfReference, IssueCode::ParentCycle]
     );
 
     let mut p = minimal();
     text_layer(&mut p).parent_id = Some(new_id(IdKind::Layer));
-    assert_eq!(
-        codes(&p),
-        vec![IssueCode::MissingReference, IssueCode::NotYetSupported]
-    );
+    assert_eq!(codes(&p), vec![IssueCode::MissingReference]);
 
     let mut p = minimal();
     let a = p.compositions[0].layers[0].id.clone();
@@ -202,6 +195,19 @@ fn 親が自分_見つからない_循環() {
         2,
         "{c:?}"
     );
+}
+
+/// MV-0010 決定5：γ0.2 から親子付けとヌルは描ける（「まだ描けない」と言わない）。
+#[test]
+fn 親子付けとヌルは問題にしない() {
+    let mut p = minimal();
+    let null = p.compositions[0].layers[1].id.clone();
+    let l = solid_layer(&mut p);
+    l.layer_type = LayerType::Null;
+    l.solid = None;
+    // 文字をヌルの子にする
+    text_layer(&mut p).parent_id = Some(null);
+    assert_eq!(codes(&p), vec![]);
 }
 
 #[test]
@@ -275,14 +281,6 @@ fn まだ描けない機能は知らせる() {
                     kind: LinkKind::Beat,
                     amount: 1.0,
                 }])
-            }),
-        ),
-        (
-            "ヌルのレイヤー",
-            Box::new(|p| {
-                let l = solid_layer(p);
-                l.layer_type = LayerType::Null;
-                l.solid = None;
             }),
         ),
         (
@@ -374,4 +372,39 @@ fn 音量のキーフレームはまだ書き出せないと知らせる() {
         vec![IssueCode::NotYetSupported]
     );
     assert!(issues[0].message.contains("音量のキーフレーム"));
+}
+
+/// MV-0010 決定5：親の親まで変形を掛ける（子 → 親 → 親の親）。親の不透明度は掛けない。
+#[test]
+fn 親の親まで変形を掛ける() {
+    let mut p = minimal();
+    let mut grand = p.compositions[0].layers[1].clone();
+    grand.id = new_id(IdKind::Layer);
+    grand.layer_type = LayerType::Null;
+    grand.solid = None;
+    grand.parent_id = None;
+    grand.transform.anchor = Animatable::vector(&[0.0, 0.0]);
+    grand.transform.position = Animatable::vector(&[1000.0, 0.0]);
+    grand.transform.scale = Animatable::vector(&[1.0, 1.0]);
+    grand.transform.rotation = Animatable::number(0.0);
+    let mut parent = grand.clone();
+    parent.id = new_id(IdKind::Layer);
+    parent.parent_id = Some(grand.id.clone());
+    parent.transform.position = Animatable::vector(&[0.0, 0.0]);
+    parent.transform.scale = Animatable::vector(&[2.0, 2.0]);
+    let mut child = parent.clone();
+    child.id = new_id(IdKind::Layer);
+    child.parent_id = Some(parent.id.clone());
+    child.transform.position = Animatable::vector(&[10.0, 5.0]);
+    child.transform.scale = Animatable::vector(&[1.0, 1.0]);
+    let c = &mut p.compositions[0];
+    c.layers = vec![child.clone(), parent, grand];
+    let m = mv_core::eval::world_matrix(c, &child, 0.0).unwrap();
+    // 子の (0,0) → 親で (10,5)×2 → 親の親で +1000
+    assert_eq!(mv_core::eval::apply(m, [0.0, 0.0]), [1020.0, 10.0]);
+    assert_eq!(
+        mv_core::eval::apply(m, [1.0, 0.0]),
+        [1022.0, 10.0],
+        "親の大きさも掛かる"
+    );
 }

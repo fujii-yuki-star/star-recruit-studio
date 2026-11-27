@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { previewApi } from "../preview/api";
 import { editApi } from "./api";
-import { dragDelta, movePositionOp, pickLayerAt, toPanel, type Bounds, type Point } from "./overlay";
+import { dragDelta, movePositionOp, pickLayerAt, toPanel, toParentDelta, type Bounds, type Point } from "./overlay";
 import type { AnimValue, Layer, Op } from "./types";
 
 /**
@@ -80,7 +80,10 @@ export function PreviewOverlay(props: {
     const k = bounds.scale / dpr;
     setDrag({ ...drag, dx: dx * k, dy: dy * k, shift: e.shiftKey });
     if (s.value == null) return;
-    s.ops = dx === 0 && dy === 0 ? [] : [movePositionOp(s.layer, frame, s.value, [dx, dy])];
+    // 位置は親の座標で書く＝親の向きと大きさの逆を通す（MV-0010 決定5）
+    const parentLinear = bounds.layers.find((l) => l.layerId === s.layer.id)?.parentLinear;
+    const local = toParentDelta([dx, dy], parentLinear);
+    s.ops = dx === 0 && dy === 0 ? [] : [movePositionOp(s.layer, frame, s.value, local)];
     props.onTrial(s.ops.length > 0 ? s.ops : null);
   };
 

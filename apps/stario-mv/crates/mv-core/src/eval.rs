@@ -1,6 +1,6 @@
 //! ある時刻の値を求める（MV-0003 決定1・決定2）。⚠️ 純粋な計算だけ＝プレビュー・書き出し・外部 AI の「1コマ描く」で同じものを使う。
 
-use crate::model::{AnimValue, Animatable, Interpolation, Keyframe, Layer, Transform};
+use crate::model::{AnimValue, Animatable, Composition, Interpolation, Keyframe, Layer, Transform};
 
 /// 区間の進み方の既定のハンドル（直線と同じ）。
 const DEFAULT_EASE_OUT: [f64; 2] = [1.0 / 3.0, 1.0 / 3.0];
@@ -251,6 +251,23 @@ pub fn transform_at(t: &Transform, frame: f64) -> Result<TransformAt, EvalError>
         rotation: number_at(&t.rotation, frame)?,
         opacity: number_at(&t.opacity, frame)?.clamp(0.0, 1.0),
     })
+}
+
+/// 親の変形まで掛けた「レイヤーの座標 → コンポジションの座標」（MV-0010 決定5＝AE の親子付け）。
+/// 子の変形 → 親の変形 → …（親の親まで）。⚠️ 不透明度は掛けない（親の不透明度は引き継がない）。
+/// 親が見える範囲の外でも、表示を切っていても、変形は効く。
+pub fn world_matrix(comp: &Composition, layer: &Layer, frame: f64) -> Result<Affine, EvalError> {
+    let mut m = transform_at(&layer.transform, frame)?.matrix();
+    let mut cur = layer.parent_id.as_deref();
+    // ⚠️ 循環は2段目の検査で断る＝ここは止まるだけ（数を数えて抜ける）
+    for _ in 0..comp.layers.len() {
+        let Some(p) = cur.and_then(|id| comp.layers.iter().find(|l| l.id == id)) else {
+            break;
+        };
+        m = mul(transform_at(&p.transform, frame)?.matrix(), m);
+        cur = p.parent_id.as_deref();
+    }
+    Ok(m)
 }
 
 /// そのフレームでレイヤーが見えるか（見せる設定・見える範囲）。⚠️ ソロは呼ぶ側（コンポジション全体を見て決める）。

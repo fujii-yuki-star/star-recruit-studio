@@ -14,6 +14,8 @@ import {
   trimInOps,
   withTrial,
   mergePatch,
+  setParentOp,
+  parentCandidates,
   trimOutOps,
   trimToPlayheadOps,
 } from "./layerOps";
@@ -140,6 +142,27 @@ describe("掴んでいる途中の帯の見え方", () => {
     expect(ls[1].inFrame).toBe(10);
     // 片方の端だけ（切る）
     expect(withTrial(ls, [{ op: "updateLayer", layerId: "A", patch: { outFrame: 5 } }])[0]).toMatchObject({ inFrame: 0, outFrame: 5 });
+  });
+});
+
+describe("親子付け（MV-0010 決定5）", () => {
+  it("親を付ける・外す＝今の時刻で見た目を保つ取引（同じ親なら何もしない）", () => {
+    const l = layer("A", 0, 10);
+    expect(setParentOp(l, "N", 12)).toEqual({ op: "setParent", layerId: "A", parentId: "N", frame: 12 });
+    expect(setParentOp({ ...l, parentId: "N" }, null, 3)).toEqual({ op: "setParent", layerId: "A", parentId: null, frame: 3 });
+    expect(setParentOp({ ...l, parentId: "N" }, "N", 3)).toBeNull();
+    expect(setParentOp(l, null, 3)).toBeNull();
+  });
+
+  it("親にできるのは、自分と自分の子孫（輪になる）を除いたレイヤー", () => {
+    const c = comp([
+      layer("A", 0, 10),
+      layer("B", 0, 10, { parentId: "A" }),
+      layer("C", 0, 10, { parentId: "B" }),
+      layer("D", 0, 10),
+    ]);
+    expect(parentCandidates(c, "A").map((l) => l.id)).toEqual(["D"]);
+    expect(parentCandidates(c, "C").map((l) => l.id)).toEqual(["A", "B", "D"]);
   });
 });
 

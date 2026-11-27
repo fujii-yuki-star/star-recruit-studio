@@ -14,6 +14,8 @@ export interface ApplyResult {
   /** その間に AI が書いていたので、最新の中身に同じ操作を当て直した（MV-0008 決定2）。 */
   reapplied: boolean;
   created: { opIndex: number; kind: string; id: string }[];
+  /** 反映したが知らせたいこと（見た目を保てなかった など）。 */
+  warnings?: string[];
 }
 
 /**
