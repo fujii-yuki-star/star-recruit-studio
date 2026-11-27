@@ -41,6 +41,8 @@ pub enum Cmd {
     Trial(Option<Vec<serde_json::Value>>),
     /// 画面の取引を保存した＝すぐ読み直す（外の変更を見る間隔を待たない）。試しもやめる。
     Reload,
+    /// 今のコマの、見えているレイヤーの枠（MV-0008 決定6）。答えは窓の画素で返す。
+    Bounds(std::sync::mpsc::Sender<Result<serde_json::Value, String>>),
 }
 
 /// 画面へ知らせる今の状態。
@@ -249,6 +251,14 @@ fn run(
                     }
                     force_reload = true;
                 }
+                Cmd::Bounds(reply) => {
+                    let r = match &open {
+                        Some(o) => bounds(&mut renderer, o, frame, rect),
+                        None => Err("動画を開いていません。".into()),
+                    };
+                    let _ = reply.send(r);
+                    continue;
+                }
                 Cmd::Composition(id) => {
                     if let Some(o) = open.as_mut() {
                         if o.project.compositions.iter().any(|c| c.id == id) {
@@ -456,6 +466,71 @@ fn run(
                 },
             );
         }
+    }
+}
+
+/// 今のコマの、見えているレイヤーの枠を窓の画素で（描画の核の枠を、絵を写した欄の位置と倍率で写す）。
+/// ⚠️ 写し方は窓へ写すときと同じ `present::fit`＝画面で倍率を書き写さない。
+fn bounds(
+    renderer: &mut Renderer,
+    o: &Open,
+    frame: i64,
+    rect: Rect,
+) -> Result<serde_json::Value, String> {
+    let p = o.shown();
+    let comp = p
+        .compositions
+        .iter()
+        .find(|c| c.id == o.comp_id)
+        .ok_or("コンポジションが見つかりません。")?;
+    let quads = renderer
+        .layer_quads(p, &o.comp_id, frame, &o.dir)
+        .map_err(|e| e.to_string())?;
+    let img = mv_render::present::fit(rect, comp.width, comp.height);
+    let scale = f64::from(img.w) / f64::from(comp.width.max(1));
+    Ok(bounds_json(
+        &quads,
+        scale,
+        [f64::from(img.x), f64::from(img.y)],
+        frame,
+    ))
+}
+
+/// 枠（コンポジションの画素）を窓の画素へ写した答え。`scale`＝コンポジションの 1 画素が窓の何画素か。
+pub fn bounds_json(
+    quads: &[mv_render::LayerQuad],
+    scale: f64,
+    origin: [f64; 2],
+    frame: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "frame": frame,
+        "scale": scale,
+        "layers": quads.iter().map(|q| serde_json::json!({
+            "layerId": q.layer_id,
+            "corners": q.corners.map(|[x, y]| [origin[0] + x * scale, origin[1] + y * scale]),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 枠は欄の位置と倍率で窓の画素へ写す() {
+        let q = [mv_render::LayerQuad {
+            layer_id: "lyr_A".into(),
+            corners: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+        }];
+        let v = bounds_json(&q, 2.0, [100.0, 50.0], 7);
+        assert_eq!(v["frame"], 7);
+        assert_eq!(v["scale"], 2.0);
+        assert_eq!(v["layers"][0]["layerId"], "lyr_A");
+        assert_eq!(
+            v["layers"][0]["corners"],
+            serde_json::json!([[100.0, 50.0], [120.0, 50.0], [120.0, 60.0], [100.0, 60.0]])
+        );
     }
 }
 

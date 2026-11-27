@@ -273,7 +273,11 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
 pub fn fill_layer_defaults(layer: &mut Map<String, Value>, comp: &Value, asset: Option<&Value>) {
     let w = comp["width"].as_f64().unwrap_or(0.0);
     let h = comp["height"].as_f64().unwrap_or(0.0);
-    let mut dur = comp["durationFrames"].as_i64().unwrap_or(0);
+    let comp_dur = comp["durationFrames"].as_i64().unwrap_or(0);
+    // 始まり（書かれていれば、そこから＝素材をタイムラインの途中へ置く・MV-0008 決定4）
+    let start = layer.get("inFrame").and_then(Value::as_i64).unwrap_or(0);
+    // 長さ（素材の長さ・無ければコンポジションの終わりまで）
+    let mut len: Option<i64> = None;
     let mut asset_center = None;
     if let Some(a) = asset {
         let kind = a["kind"].as_str().unwrap_or_default();
@@ -301,19 +305,26 @@ pub fn fill_layer_defaults(layer: &mut Map<String, Value>, comp: &Value, asset: 
             _ => None,
         };
         if let Some(secs) = secs {
-            let frames = (secs * comp_fps - 1e-6).ceil().max(1.0) as i64;
-            dur = dur.min(frames);
+            len = Some((secs * comp_fps - 1e-6).ceil().max(1.0) as i64);
         }
     }
     layer
         .entry("id")
         .or_insert_with(|| json!(new_id(IdKind::Layer)));
+    // 終わり＝始まり＋素材の長さ（コンポジションの終わりまで）。素材の長さが無ければコンポジションの終わり。
+    // ⚠️ 終わりより後に始めたときは、素材の長さ（無ければ1コマ）だけ見せる＝空の範囲を作らない
+    let out = match len {
+        Some(n) if start + n <= comp_dur || start >= comp_dur => start + n,
+        Some(_) => comp_dur,
+        None if start < comp_dur => comp_dur,
+        None => start + 1,
+    };
     for (k, v) in [
         ("enabled", json!(true)),
         ("locked", json!(false)),
-        ("inFrame", json!(0)),
-        ("outFrame", json!(dur)),
-        ("startFrame", json!(0)),
+        ("inFrame", json!(start)),
+        ("outFrame", json!(out)),
+        ("startFrame", json!(start)),
         ("parentId", Value::Null),
         ("blendMode", json!("normal")),
         ("trackMatte", Value::Null),
@@ -657,6 +668,51 @@ mod tests {
             a["outFrame"],
             json!(300),
             "コンポジションより長ければそこまで"
+        );
+        // 途中から始める＝終わりと素材の時刻 0 もそこから（コンポジションの終わりで止める）
+        let mut late = json!({"name": "v", "assetId": "ast_X", "inFrame": 100})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut late, &comp, Some(&video));
+        assert_eq!(
+            (
+                late["inFrame"].as_i64(),
+                late["outFrame"].as_i64(),
+                late["startFrame"].as_i64()
+            ),
+            (Some(100), Some(175), Some(100))
+        );
+        let mut end = json!({"name": "v", "assetId": "ast_X", "inFrame": 260})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut end, &comp, Some(&video));
+        assert_eq!(
+            end["outFrame"],
+            json!(300),
+            "コンポジションの終わりで止める"
+        );
+        let mut past = json!({"name": "v", "assetId": "ast_X", "inFrame": 320})
+            .as_object()
+            .unwrap()
+            .clone();
+        fill_layer_defaults(&mut past, &comp, Some(&video));
+        assert_eq!(
+            past["outFrame"],
+            json!(395),
+            "終わりより後なら素材の長さだけ（空にしない）"
+        );
+        let mut solid_late =
+            json!({"name": "s", "type": "solid", "solid": {"color": [1,0,0,1]}, "inFrame": 50})
+                .as_object()
+                .unwrap()
+                .clone();
+        fill_layer_defaults(&mut solid_late, &comp, None);
+        assert_eq!(
+            solid_late["outFrame"],
+            json!(300),
+            "素材の無いものはコンポジションの終わりまで"
         );
         let img = json!({"id": "ast_I", "kind": "svg", "meta": {"width": 100, "height": 50}});
         let mut i = json!({"name": "i", "assetId": "ast_I", "type": "image"})

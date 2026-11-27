@@ -128,14 +128,27 @@ pub struct Ops {
     /// MCP を `--project` 付きで起動したときの既定の動画。
     pub default_project: Option<PathBuf>,
     renderer: Option<Renderer>,
+    /// 呼ぶのが利用者（アプリの画面）か＝利用者が選んだ素材は許したフォルダの外でも取り込める（MV-0008 決定2）。
+    /// ⚠️ AI の口（MCP・コマンド）は必ず `false`＝許したフォルダの決まりは AI のためのもの。
+    user_caller: bool,
 }
 
 impl Ops {
+    /// 外部 AI の口（MCP・コマンド）。素材の取り込み・書き出しは許したフォルダの中だけ。
     pub fn new(settings: Settings, default_project: Option<PathBuf>) -> Self {
         Self {
             settings,
             default_project,
             renderer: None,
+            user_caller: false,
+        }
+    }
+
+    /// アプリの画面（利用者）の口。利用者が選んだ素材は、許したフォルダの外でも取り込める（MV-0008 決定2）。
+    pub fn for_user(settings: Settings) -> Self {
+        Self {
+            user_caller: true,
+            ..Self::new(settings, None)
         }
     }
 
@@ -403,7 +416,7 @@ impl Ops {
                 )
             };
             let src = PathBuf::from(op["path"].as_str().unwrap_or_default());
-            if !self.settings.is_allowed(&src, &[]) {
+            if !self.user_caller && !self.settings.is_allowed(&src, &[]) {
                 return Err(fail(not_allowed(&src).message));
             }
             let ffprobe = mv_export::locate_ffmpeg(self.settings.ffmpeg.as_deref(), &[])

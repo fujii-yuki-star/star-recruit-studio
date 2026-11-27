@@ -355,12 +355,8 @@ impl Renderer {
         drop(clear_pass);
         self.gpu.queue.submit(Some(enc.finish()));
 
-        let any_solo = comp.layers.iter().any(|l| l.solo == Some(true));
         // ⚠️ 先頭が最前面（MV-0001 決定6）＝描くのは末尾から
-        for layer in comp.layers.iter().rev() {
-            if !is_visible_at(layer, frame) || (any_solo && layer.solo != Some(true)) {
-                continue;
-            }
+        for layer in shown_layers(comp, frame).into_iter().rev() {
             let Some((content, m)) =
                 self.layer_content(project, comp, layer, frame, project_dir)?
             else {
@@ -370,6 +366,35 @@ impl Renderer {
             std::mem::swap(&mut a, &mut b);
         }
         self.finish(&a, w, h, linear)
+    }
+
+    /// 見えているレイヤーの枠＝中身の四隅をコンポジションの画素で（MV-0008 決定6）。並びは先頭が最前面。
+    /// ⚠️ 描くときと同じ中身の大きさ・変形を通す（`layer_content`）＝画面で近似で描き写さない。描くものの無いレイヤー（音・透明）は入れない。
+    /// ⚠️ 中身は縁をなめらかにする余白を持つ＝枠は描いた絵の外枠（中身の大きさより1画素ほど広いことがある）。
+    pub fn layer_quads(
+        &mut self,
+        project: &Project,
+        composition_id: &str,
+        frame: i64,
+        project_dir: &Path,
+    ) -> Result<Vec<LayerQuad>, RenderError> {
+        let comp = project
+            .compositions
+            .iter()
+            .find(|c| c.id == composition_id)
+            .ok_or_else(|| RenderError::CompositionNotFound(composition_id.into()))?;
+        let mut out = Vec::new();
+        for layer in shown_layers(comp, frame) {
+            if let Some((content, m)) =
+                self.layer_content(project, comp, layer, frame, project_dir)?
+            {
+                out.push(LayerQuad {
+                    layer_id: layer.id.clone(),
+                    corners: quad_of(m, content.width, content.height),
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// レイヤーの中身と、中身の画素 → コンポジションの画素 への変換。描くものが無ければ None。
@@ -886,5 +911,46 @@ fn blend_id(m: BlendMode) -> u32 {
         BlendMode::Saturation => 14,
         BlendMode::Color => 15,
         BlendMode::Luminosity => 16,
+    }
+}
+
+/// レイヤーの枠（MV-0008 決定6）。`corners`＝中身の左上・右上・右下・左下を、コンポジションの画素で。
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerQuad {
+    pub layer_id: String,
+    pub corners: [[f64; 2]; 4],
+}
+
+/// そのフレームで見えているレイヤー（見せる設定・見える範囲・ソロ）。並びは先頭が最前面。
+/// ⚠️ 描くとき（末尾から）と枠を求めるときで同じものを通す。
+pub fn shown_layers(comp: &mv_core::model::Composition, frame: i64) -> Vec<&mv_core::model::Layer> {
+    let any_solo = comp.layers.iter().any(|l| l.solo == Some(true));
+    comp.layers
+        .iter()
+        .filter(|l| is_visible_at(l, frame) && (!any_solo || l.solo == Some(true)))
+        .collect()
+}
+
+/// 中身（`w`×`h` 画素）の四隅を、変換 `m`（中身の画素 → コンポジションの画素）で写す。
+pub fn quad_of(m: Affine, w: u32, h: u32) -> [[f64; 2]; 4] {
+    let (w, h) = (f64::from(w), f64::from(h));
+    [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]].map(|p| mv_core::eval::apply(m, p))
+}
+
+#[cfg(test)]
+mod quad_tests {
+    use super::*;
+
+    #[test]
+    fn 四隅は変換で写す_回転も() {
+        // 2 倍して (10, 20) へ
+        assert_eq!(
+            quad_of([2.0, 0.0, 0.0, 2.0, 10.0, 20.0], 3, 4),
+            [[10.0, 20.0], [16.0, 20.0], [16.0, 28.0], [10.0, 28.0]]
+        );
+        // 90 度（x→y）
+        let q = quad_of([0.0, 1.0, -1.0, 0.0, 0.0, 0.0], 2, 1);
+        assert_eq!(q[1], [0.0, 2.0]);
+        assert_eq!(q[3], [-1.0, 0.0]);
     }
 }

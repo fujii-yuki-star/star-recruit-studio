@@ -155,6 +155,36 @@ async fn edit_apply(
     r
 }
 
+/// 今のコマの、見えているレイヤーの枠（窓の画素・MV-0008 決定6）。プレビューの糸に描画の核で求めてもらう。
+#[tauri::command]
+async fn preview_bounds(tx: tauri::State<'_, PreviewTx>) -> Result<Value, String> {
+    let (reply, rx) = std::sync::mpsc::channel();
+    tx.send(Cmd::Bounds(reply))?;
+    rx.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| "プレビューが答えません。少し待ってからもう一度押してください。".to_string())?
+}
+
+/// 素材のファイルを選ぶ（利用者が選んだもの＝許したフォルダの外でも取り込める・MV-0008 決定2）。
+#[tauri::command]
+async fn pick_asset_files(app: tauri::AppHandle) -> Vec<String> {
+    app.dialog()
+        .file()
+        .set_title("取り込む素材を選ぶ")
+        .add_filter(
+            "素材",
+            &[
+                "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "svg", "mp4", "mov", "m4v",
+                "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "flac", "ogg", "opus",
+            ],
+        )
+        .blocking_pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.into_path().ok())
+        .map(|p| p.display().to_string())
+        .collect()
+}
+
 /// 値の欄に出す、動かせる値の今の時刻での値（描画の核と同じ計算＝MV-0008 決定5）。
 #[tauri::command]
 fn edit_eval(layer: Value, frame: i64) -> Value {
@@ -243,7 +273,8 @@ pub fn run() {
             let ffmpeg = resolve_ffmpeg(&settings, res.as_deref());
             let (tx, rx) = std::sync::mpsc::channel();
             app.manage(PreviewTx(Mutex::new(tx)));
-            app.manage(Editor(Mutex::new(mv_ops::Ops::new(settings.clone(), None))));
+            // ⚠️ 画面の操作口は「利用者」＝利用者が選んだ素材は許したフォルダの外でも取り込める（AI の口は別＝MV-0008 決定2）
+            app.manage(Editor(Mutex::new(mv_ops::Ops::for_user(settings.clone()))));
             preview::spawn(window, fonts, ffmpeg, rx);
             Ok(())
         })
@@ -261,7 +292,9 @@ pub fn run() {
             edit_read,
             edit_apply,
             edit_trial,
-            edit_eval
+            edit_eval,
+            preview_bounds,
+            pick_asset_files
         ])
         .run(tauri::generate_context!())
         .expect("すたりおMV を起動できませんでした");
