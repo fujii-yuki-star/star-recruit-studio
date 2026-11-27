@@ -28,7 +28,15 @@ export interface TimelineProps {
 }
 
 type Drag =
-  | { kind: "move" | "in" | "out"; id: string; x0: number; moved: boolean; ops: Op[] }
+  | {
+      kind: "move" | "in" | "out";
+      id: string;
+      x0: number;
+      moved: boolean;
+      ops: Op[];
+      /** 選んでいるものの1つを押した＝動かさずに離したら、それだけを選び直す（AE の型）。 */
+      narrowOnClick: boolean;
+    }
   | { kind: "order"; id: string; y0: number; from: number; to: number; moved: boolean };
 
 /**
@@ -96,7 +104,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       if (next.has(l.id)) next.delete(l.id);
       else next.add(l.id);
       props.onSelect([...next], l.id);
-    } else if (!selected.has(l.id) || selected.size > 1) {
+    } else {
       props.onSelect([l.id], l.id);
     }
   };
@@ -105,13 +113,19 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   const startBar = (e: React.PointerEvent, l: Layer): void => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    select(l, e);
-    if (l.locked) return;
+    // ⚠️ 選んでいるものの1つを押したときは、押した瞬間に選択を縮めない＝そのまままとめて動かせる（AE の型）
+    const plain = !e.shiftKey && !e.ctrlKey && !e.metaKey;
+    const narrowOnClick = plain && selected.has(l.id) && selected.size > 1;
+    if (!narrowOnClick) select(l, e);
+    if (l.locked) {
+      if (narrowOnClick) props.onSelect([l.id], l.id);
+      return;
+    }
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = e.clientX - r.left;
     const kind = x <= EDGE_PX ? "in" : x >= r.width - EDGE_PX ? "out" : "move";
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    setDrag({ kind, id: l.id, x0: e.clientX, moved: false, ops: [] });
+    setDrag({ kind, id: l.id, x0: e.clientX, moved: false, ops: [], narrowOnClick });
   };
 
   const barOps = (d: Extract<Drag, { kind: "move" | "in" | "out" }>, clientX: number): Op[] => {
@@ -167,6 +181,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     }
     if (d.ops.length > 0) props.onCommit(d.ops);
     else if (d.moved) props.onTrial(null);
+    else if (d.narrowOnClick) props.onSelect([d.id], d.id);
   };
 
   // ── 目盛りと今の時刻の線（掴んで動かしている間もプレビューが追う） ──

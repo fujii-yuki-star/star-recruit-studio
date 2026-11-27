@@ -58,6 +58,9 @@ describe("吸着（MV-0008 決定4）", () => {
     expect(snapOffset([45], [50], 2)).toBe(0);
     // 2つの端のうち近いほう（始まりは 2 フレーム・終わりは 1 フレーム）
     expect(snapOffset([48, 79], [50, 80], 2)).toBe(1);
+    // 並びの順に関わらず近いほう（後から見たものが遠ければ置き換えない）
+    expect(snapOffset([79, 48], [50, 80], 2)).toBe(1);
+    expect(snapOffset([48], [52, 49], 2)).toBe(1);
     expect(snapOffset([10], [10], 2)).toBe(0);
   });
 });

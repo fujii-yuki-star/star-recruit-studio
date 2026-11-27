@@ -8,6 +8,7 @@ const handlers: Record<string, (p: unknown) => void> = {};
 const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
 let applyReply: () => unknown = () => ({ applied: true, revision: "r2", reapplied: false, created: [] });
 let reads = 0;
+let lockA = false;
 
 const comp = {
   id: "cmp_A",
@@ -35,7 +36,7 @@ const doc = (): unknown => ({
     mainCompositionId: "cmp_A",
     assets: [{ id: "ast_1", kind: "video", name: "海.mp4" }],
     compositions: [
-      { ...comp, markers: [], layers: [layer("A", 0, 100), layer("B", 100, 200), layer("C", 200, 300)] },
+      { ...comp, markers: [], layers: [layer("A", 0, 100, { locked: lockA }), layer("B", 100, 200), layer("C", 200, 300)] },
     ],
   },
 });
@@ -86,6 +87,7 @@ describe("編集画面（MV-0008 ⑧-1）", () => {
   beforeEach(() => {
     calls.length = 0;
     reads = 0;
+    lockA = false;
     applyReply = () => ({ applied: true, revision: "r2", reapplied: false, created: [] });
   });
   afterEach(cleanup);
@@ -149,6 +151,59 @@ describe("編集画面（MV-0008 ⑧-1）", () => {
     expect(applied()).toEqual([]);
     fireEvent.keyDown(window, { key: "s" });
     expect(screen.getByRole("button", { name: "吸着" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("吸着を切ると、近くても吸い付かずに動かした量そのまま", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "吸着" }));
+    const tl = screen.getByTestId("timeline");
+    fireEvent.pointerDown(sizeBar("B"), { button: 0, clientX: 50 });
+    fireEvent.pointerMove(tl, { clientX: 53 });
+    expect(calls.filter((c) => c.cmd === "edit_trial").map((c) => c.args?.ops)).toEqual([
+      [{ op: "updateLayer", layerId: "B", patch: { inFrame: 103, outFrame: 203, startFrame: 103 } }],
+    ]);
+  });
+
+  it("選んでいるものをまとめて同じだけ動かす（掴んだものが選ばれていれば）", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "吸着" }));
+    const tl = screen.getByTestId("timeline");
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    fireEvent.pointerDown(sizeBar("B"), { button: 0, clientX: 50 });
+    fireEvent.pointerMove(tl, { clientX: 60 });
+    await act(async () => {
+      fireEvent.pointerUp(tl, { clientX: 60 });
+    });
+    expect(applied()[0].ops).toEqual([
+      { op: "updateLayer", layerId: "A", patch: { inFrame: 10, outFrame: 110, startFrame: 10 } },
+      { op: "updateLayer", layerId: "B", patch: { inFrame: 110, outFrame: 210, startFrame: 110 } },
+      { op: "updateLayer", layerId: "C", patch: { inFrame: 210, outFrame: 310, startFrame: 210 } },
+    ]);
+  });
+
+  it("選んでいるものの1つを動かさずに押して離すと、それだけを選び直す", async () => {
+    await mount();
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    fireEvent.pointerDown(sizeBar("B"), { button: 0, clientX: 50 });
+    // 押しただけでは縮めない（そのまま動かせる）
+    expect(screen.getByLabelText("値の欄").textContent).toContain("3 個のレイヤーを選んでいます");
+    fireEvent.pointerUp(screen.getByTestId("timeline"), { clientX: 50 });
+    expect(screen.getByTestId("layer-props").textContent).toContain("名前B");
+  });
+
+  it("錠のかかった帯は掴んでも動かない（選ぶだけ）", async () => {
+    lockA = true;
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "吸着" }));
+    const tl = screen.getByTestId("timeline");
+    fireEvent.pointerDown(sizeBar("A"), { button: 0, clientX: 50 });
+    fireEvent.pointerMove(tl, { clientX: 70 });
+    await act(async () => {
+      fireEvent.pointerUp(tl, { clientX: 70 });
+    });
+    expect(calls.filter((c) => c.cmd === "edit_trial")).toEqual([]);
+    expect(applied()).toEqual([]);
+    expect(screen.getByTestId("layer-props").textContent).toContain("名前A");
   });
 
   it("帯の端を掴むと、その端だけ動く（切る）", async () => {

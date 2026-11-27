@@ -82,7 +82,11 @@ describe("プレビュー画面", () => {
   it("コンポジションを切り替えると Rust へ伝え、外の変更で一覧が変わる", async () => {
     await mount();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "cmp_B" } });
-    expect(calls.at(-1)).toEqual({ cmd: "preview_set_composition", args: { id: "cmp_B" } });
+    // ⚠️ 編集の中身の読み込み（edit_read）が後から並ぶことがある＝プレビューへの命令だけで見る
+    expect(calls.filter((c) => c.cmd.startsWith("preview_")).at(-1)).toEqual({
+      cmd: "preview_set_composition",
+      args: { id: "cmp_B" },
+    });
     act(() =>
       handlers["project-changed"]({ ...summary, name: "外で直した", compositions: [summary.compositions[0]] }),
     );
