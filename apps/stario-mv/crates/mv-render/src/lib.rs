@@ -418,7 +418,7 @@ impl Renderer {
             return Ok(None);
         }
         let inner = nested_comp(project, layer)?;
-        let Some(inner_frame) = nested_frame(comp, inner, layer, frame) else {
+        let Some(inner_frame) = nested_frame(comp, inner, layer, frame)? else {
             return Ok(None);
         };
         if depth + 1 > MAX_NEST_DEPTH {
@@ -575,18 +575,23 @@ impl Renderer {
             LayerType::Video => {
                 // ⚠️ 映像のコマは控えに入れない（毎コマ変わる＝控えると記憶を食いつぶす）
                 let (kind, path) = asset_path(project, layer, project_dir)?;
-                let t_sec = (frame - layer.start_frame) as f64 * f64::from(comp.fps.den)
-                    / f64::from(comp.fps.num);
+                // 素材の秒（タイムリマップがあればその値・MV-0012 決定1）
+                let t_sec = mv_core::eval::source_sec(comp, layer, frame as f64)
+                    .map_err(RenderError::eval)?;
+                let remapped = layer.time_remap.is_some();
                 let content = match kind {
                     AssetKind::ImageSequence => {
                         let fps = asset_fps(project, layer).unwrap_or(30.0);
-                        let idx = (t_sec * fps + 1e-6).floor();
                         let count = project
                             .assets
                             .iter()
                             .find(|a| Some(&a.id) == layer.asset_id.as_ref())
                             .and_then(|a| a.meta.as_ref())
                             .and_then(|m| m.frame_count);
+                        let mut idx = (t_sec * fps + 1e-6).floor();
+                        if remapped {
+                            idx = hold_index(idx as i64, count.map(u64::from)) as f64;
+                        }
                         if idx < 0.0 || count.is_some_and(|c| idx as u64 >= u64::from(c)) {
                             return Ok(None);
                         }
@@ -619,7 +624,10 @@ impl Renderer {
                             self.videos.insert(path.clone(), d);
                         }
                         let d = self.videos.get_mut(&path).expect("直前で開いた");
-                        let idx = d.frame_index(t_sec);
+                        let mut idx = d.frame_index(t_sec);
+                        if remapped {
+                            idx = hold_index(idx, d.info.frame_count);
+                        }
                         let (w, h) = (d.info.width, d.info.height);
                         match d.frame(idx)? {
                             Some(px) => raster::rgba(w, h, px),
@@ -1063,18 +1071,30 @@ fn nested_comp<'a>(
 }
 
 /// 外のフレーム → 入れ子の中のフレーム（MV-0011 決定2＝秒にして中の fps で切り捨て）。中の長さの外なら None。
+/// タイムリマップがあれば、その秒の中のフレーム・範囲の外は端で止める（MV-0012 決定1）。
 pub fn nested_frame(
     outer: &mv_core::model::Composition,
     inner: &mv_core::model::Composition,
     layer: &mv_core::model::Layer,
     frame: i64,
-) -> Option<i64> {
-    let sec =
-        (frame - layer.start_frame) as f64 * f64::from(outer.fps.den) / f64::from(outer.fps.num);
+) -> Result<Option<i64>, RenderError> {
+    let sec = mv_core::eval::source_sec(outer, layer, frame as f64).map_err(RenderError::eval)?;
     let f = (sec * f64::from(inner.fps.num) / f64::from(inner.fps.den) + 1e-6).floor() as i64;
-    (0..i64::from(inner.duration_frames))
-        .contains(&f)
-        .then_some(f)
+    let count = u64::from(inner.duration_frames);
+    Ok(if layer.time_remap.is_some() {
+        Some(hold_index(f, Some(count)))
+    } else {
+        (0..count as i64).contains(&f).then_some(f)
+    })
+}
+
+/// タイムリマップの範囲の外は端のコマで止める（MV-0012 決定1＝AE と同じ）。コマ数がわからなければ 0 より前だけ止める。
+pub fn hold_index(k: i64, count: Option<u64>) -> i64 {
+    let k = k.max(0);
+    match count {
+        Some(c) if c > 0 => k.min(c as i64 - 1),
+        _ => k,
+    }
 }
 
 /// ヌルの枠の大きさ（レイヤーの座標・AE のヌルと同じ 100×100）。

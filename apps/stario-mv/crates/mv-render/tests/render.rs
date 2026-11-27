@@ -685,14 +685,117 @@ fn 入れ子の時刻は秒で中の_fps_へ切り捨て() {
     let mut l = base_layer(LayerType::Precomp);
     l.start_frame = 10;
     // 外 10 → 0 秒 → 中 0 ／ 外 25 → 0.5 秒 → 中 12 ／ 外 9 → 前 ／ 外 70 → 2 秒 → 中 48＝外
-    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 10), Some(0));
-    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 25), Some(12));
+    assert_eq!(nf(&outer, &inner, &l, 10), Some(0));
+    assert_eq!(nf(&outer, &inner, &l, 25), Some(12));
     assert_eq!(
-        mv_render::nested_frame(&outer, &inner, &l, 11),
+        nf(&outer, &inner, &l, 11),
         Some(0),
         "1/30 秒は中の 0.8 コマ＝切り捨て"
     );
-    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 9), None);
-    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 69), Some(47));
-    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 70), None);
+    assert_eq!(nf(&outer, &inner, &l, 9), None);
+    assert_eq!(nf(&outer, &inner, &l, 69), Some(47));
+    assert_eq!(nf(&outer, &inner, &l, 70), None);
+}
+
+fn nf(outer: &Composition, inner: &Composition, l: &Layer, frame: i64) -> Option<i64> {
+    mv_render::nested_frame(outer, inner, l, frame).unwrap()
+}
+
+fn lin(frame: i64, v: f64) -> Keyframe {
+    Keyframe {
+        frame,
+        value: AnimValue::Number(v),
+        interpolation: Interpolation::Linear,
+        ease_out: None,
+        ease_in: None,
+        spatial_out: None,
+        spatial_in: None,
+    }
+}
+
+#[test]
+fn 入れ子のタイムリマップは素材の秒で範囲の外は端で止める() {
+    let mut outer = blank(WorkingColorSpace::Srgb).compositions[0].clone();
+    outer.fps = Rational { num: 30, den: 1 };
+    let mut inner = outer.clone();
+    inner.fps = Rational { num: 24, den: 1 };
+    inner.duration_frames = 48;
+    let mut l = base_layer(LayerType::Precomp);
+    l.start_frame = 10;
+    // 外 0〜30 で中の 2 秒 → 0 秒（逆再生）。startFrame は使わない
+    l.time_remap = Some(Animatable {
+        keyframes: Some(vec![lin(0, 2.0), lin(30, 0.0)]),
+        ..Default::default()
+    });
+    // 外 15 → 1 秒 → 中 24
+    assert_eq!(nf(&outer, &inner, &l, 15), Some(24));
+    // 外 0 → 2 秒 → 中 48＝範囲の外 → 最後のコマ 47 で止める
+    assert_eq!(nf(&outer, &inner, &l, 0), Some(47));
+    // 外 30 以降 → 0 秒 → 中 0
+    assert_eq!(nf(&outer, &inner, &l, 40), Some(0));
+    // 負の秒 → 0 で止める
+    l.time_remap = Some(Animatable::number(-1.0));
+    assert_eq!(nf(&outer, &inner, &l, 5), Some(0));
+}
+
+#[test]
+fn 端で止める() {
+    assert_eq!(mv_render::hold_index(-3, Some(10)), 0);
+    assert_eq!(mv_render::hold_index(4, Some(10)), 4);
+    assert_eq!(mv_render::hold_index(10, Some(10)), 9);
+    assert_eq!(mv_render::hold_index(99, None), 99);
+}
+
+#[test]
+fn 連番の映像はタイムリマップの秒のコマを見せ_範囲の外は端で止める() {
+    let dir = std::env::temp_dir().join(format!("mv-render-test-{}", new_id(IdKind::Asset)));
+    std::fs::create_dir_all(dir.join("assets")).unwrap();
+    // 0＝赤・1＝緑・2＝青（10 fps）
+    for (i, c) in [[255u8, 0, 0], [0, 255, 0], [0, 0, 255]].iter().enumerate() {
+        image::RgbaImage::from_fn(4, 4, |_, _| image::Rgba([c[0], c[1], c[2], 255]))
+            .save(dir.join(format!("assets/s_{i:03}.png")))
+            .unwrap();
+    }
+    let mut p = blank(WorkingColorSpace::Srgb);
+    let asset_id = new_id(IdKind::Asset);
+    p.assets.push(Asset {
+        id: asset_id.clone(),
+        kind: AssetKind::ImageSequence,
+        name: "s".into(),
+        source: AssetSource::Copied {
+            path: "assets/s_000.png".into(),
+        },
+        sha256: None,
+        meta: Some(AssetMeta {
+            fps: Some(Rational { num: 10, den: 1 }),
+            frame_count: Some(3),
+            ..Default::default()
+        }),
+    });
+    let mut l = base_layer(LayerType::Video);
+    l.asset_id = Some(asset_id);
+    l.transform.position = Animatable::vector(&[10.0, 10.0]);
+    l.transform.scale = Animatable::vector(&[10.0, 10.0]);
+    p.compositions[0].layers.push(l);
+    let id = p.main_composition_id.clone();
+    let px = |p: &Project, f: i64| renderer().render(p, &id, f, &dir).unwrap().pixel(30, 30);
+    // リマップなし＝0 フレームは赤・範囲の外（3 コマ目以降＝0.3 秒）は描かない
+    assert!(near(px(&p, 0), [255, 0, 0, 255], 2));
+    let fps = f64::from(p.compositions[0].fps.num) / f64::from(p.compositions[0].fps.den);
+    let after = (0.35 * fps).ceil() as i64;
+    assert!(
+        near(px(&p, after), [0, 0, 0, 255], 2),
+        "リマップなしは素材の外を描かない"
+    );
+    // 固定値 0.15 秒＝コマ 1＝緑（どのフレームでも）
+    p.compositions[0].layers[0].time_remap = Some(Animatable::number(0.15));
+    assert!(near(px(&p, 0), [0, 255, 0, 255], 2), "{:?}", px(&p, 0));
+    // 素材の外（5 秒）＝最後のコマ（青）で止める
+    p.compositions[0].layers[0].time_remap = Some(Animatable::number(5.0));
+    assert!(
+        near(px(&p, after), [0, 0, 255, 255], 2),
+        "{:?}",
+        px(&p, after)
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }

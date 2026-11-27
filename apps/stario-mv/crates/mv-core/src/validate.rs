@@ -37,7 +37,6 @@ pub struct Issue {
 
 /// まだ使えない機能と、使えるようになる版（ADR-0074 決定6 の表から）。⚠️ **1か所に置く**。
 const NOT_YET: &[(&str, &str)] = &[
-    ("タイムリマップ", "γ0.2"),
     ("2.5D（奥行き・カメラ）", "γ0.2"),
     ("つなぎ", "γ0.3"),
     ("音量のキーフレーム", "γ0.3"),
@@ -282,13 +281,6 @@ impl Checker {
                 IssueCode::NotYetSupported,
                 format!("{lpath}/threeD"),
                 not_yet("2.5D（奥行き・カメラ）"),
-            );
-        }
-        if l.time_remap.is_some() {
-            self.push(
-                IssueCode::NotYetSupported,
-                format!("{lpath}/timeRemap"),
-                not_yet("タイムリマップ"),
             );
         }
         if !l.effects.is_empty() {
