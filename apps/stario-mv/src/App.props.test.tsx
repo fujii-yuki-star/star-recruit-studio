@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 const handlers: Record<string, (p: unknown) => void> = {};
+/** 値を求める答えを止めておく（時刻が変わってから答えが届くまでの間を見る）。 */
+let holdEval = false;
+let releaseEval: (() => void) | null = null;
 const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
 
 const comp = { id: "cmp_A", name: "本編", width: 640, height: 360, fps: { num: 30, den: 1 }, durationFrames: 300 };
@@ -49,6 +52,18 @@ const layers = (): unknown[] => [
     transform: transform(),
   },
   {
+    id: "X",
+    name: "式",
+    type: "solid",
+    enabled: true,
+    locked: false,
+    inFrame: 0,
+    outFrame: 100,
+    startFrame: 0,
+    solid: { color: [0, 0, 1, 1], width: 10, height: 10 },
+    transform: transform({ opacity: { expression: { language: "javascript", source: "time" } } }),
+  },
+  {
     id: "L",
     name: "錠",
     type: "solid",
@@ -75,6 +90,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     if (cmd === "edit_apply") return { applied: true, revision: "r2", reapplied: false, created: [] };
     if (cmd === "edit_eval") {
+      if (holdEval) await new Promise<void>((r) => (releaseEval = r));
       // Rust が求めた値の代わり（キーの間は 20 フレームで [50, 0]）
       const id = (args?.layer as { id: string }).id;
       return {
@@ -114,6 +130,8 @@ async function selectLayer(id: string, frame = 20): Promise<HTMLElement> {
 describe("値の欄（MV-0008 ⑧-2）", () => {
   beforeEach(() => {
     calls.length = 0;
+    holdEval = false;
+    releaseEval = null;
   });
   afterEach(cleanup);
 
@@ -232,6 +250,38 @@ describe("値の欄（MV-0008 ⑧-2）", () => {
     fireEvent.pointerMove(x, { clientX: 30 });
     fireEvent.pointerUp(x, { clientX: 30 });
     expect(calls.filter((c) => c.cmd === "edit_trial" || c.cmd === "edit_apply")).toEqual([]);
+  });
+
+  it("式で動く値は直せない（値が求まっていても）・（式）と出す", async () => {
+    const p = await selectLayer("X");
+    const row = within(p).getByTestId("prop-/transform/opacity");
+    expect(row.textContent).toContain("（式）");
+    expect(within(row).getByRole("spinbutton", { name: "不透明度" }).getAttribute("aria-disabled")).toBe("true");
+    expect(within(p).getByRole("spinbutton", { name: "回転" }).getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("時刻が変わってから値が届くまでは、前の時刻の値を出さない（直せない）", async () => {
+    const p = await selectLayer("T");
+    expect(within(p).getByRole("spinbutton", { name: "位置 x" }).textContent).toBe("100.0");
+    holdEval = true;
+    act(() => handlers["preview-status"]({ compositionId: "cmp_A", frame: 25, playing: false, fps: 0, dropped: 0 }));
+    const x = within(p).getByRole("spinbutton", { name: "位置 x" });
+    expect(x.getAttribute("aria-disabled")).toBe("true");
+    expect(x.textContent).not.toBe("100.0");
+    await act(async () => {
+      releaseEval?.();
+    });
+    expect(within(p).getByRole("spinbutton", { name: "位置 x" }).textContent).toBe("100.0");
+  });
+
+  it("Shift を押しながら掴むと 10 倍動く", async () => {
+    const p = await selectLayer("T");
+    const x = within(p).getByRole("spinbutton", { name: "位置 x" });
+    fireEvent.pointerDown(x, { button: 0, clientX: 100 });
+    fireEvent.pointerMove(x, { clientX: 103, shiftKey: true });
+    expect(calls.filter((c) => c.cmd === "edit_trial").at(-1)?.args?.ops).toEqual([
+      { op: "updateLayer", layerId: "T", patch: { transform: { position: { value: [130, 50] } } } },
+    ]);
   });
 
   it("描画モード・文・色も取引で直す", async () => {

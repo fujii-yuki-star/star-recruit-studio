@@ -123,6 +123,12 @@ describe("固定値とキーフレームを書く（MV-0008 決定5）", () => {
     expect(nextKeyFrame(a, 30)).toBeNull();
     expect(nextKeyFrame(a, 10)).toBe(30);
     expect(prevKeyFrame(animAt(base(), "/transform/position"), 50)).toBeNull();
+    // 3つ以上でも、いちばん近いもの
+    const three = {
+      keyframes: [10, 30, 50].map((frame) => ({ frame, value: 0, interpolation: "linear" as const })),
+    };
+    expect(nextKeyFrame(three, 20)).toBe(30);
+    expect(prevKeyFrame(three, 40)).toBe(30);
   });
 
   it("キーは時刻の順に入れる", () => {
