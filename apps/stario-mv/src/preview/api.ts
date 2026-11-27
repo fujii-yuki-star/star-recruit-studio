@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Fps } from "./timecode";
+import type { Bounds } from "../edit/overlay";
 
 /** 開いた動画の要約（Rust の `summary`）。 */
 export interface ProjectSummary {
@@ -52,6 +53,8 @@ export const previewApi = {
   step: (delta: number): Promise<void> => invoke("preview_step", { delta }),
   setComposition: (id: string): Promise<void> => invoke("preview_set_composition", { id }),
   setMuted: (muted: boolean): Promise<void> => invoke("preview_set_muted", { muted }),
+  /** 今のコマの、見えているレイヤーの枠（描画の核が求める・窓の画素＝MV-0008 決定6）。 */
+  bounds: (): Promise<Bounds> => invoke("preview_bounds"),
   onStatus: (f: (s: PreviewStatus) => void): Promise<UnlistenFn> =>
     listen<PreviewStatus>("preview-status", (e) => f(e.payload)),
   onError: (f: (m: string | null) => void): Promise<UnlistenFn> =>

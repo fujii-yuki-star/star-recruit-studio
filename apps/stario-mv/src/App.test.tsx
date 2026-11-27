@@ -68,7 +68,10 @@ describe("プレビュー画面", () => {
     for (const key of [" ", "ArrowRight", "PageUp", "ArrowLeft", "PageDown", "Home", "End"]) {
       fireEvent.keyDown(window, { key });
     }
-    expect(calls.filter((c) => c.cmd.startsWith("preview_") && c.cmd !== "preview_set_rect")).toEqual([
+    // ⚠️ 欄の矩形と枠の問い合わせ（preview_bounds＝MV-0008 決定6）は再生の命令ではない
+    const transport = (c: { cmd: string }): boolean =>
+      c.cmd.startsWith("preview_") && c.cmd !== "preview_set_rect" && c.cmd !== "preview_bounds";
+    expect(calls.filter(transport)).toEqual([
       { cmd: "preview_play", args: undefined },
       { cmd: "preview_step", args: { delta: 1 } },
       { cmd: "preview_step", args: { delta: -1 } },
@@ -83,7 +86,7 @@ describe("プレビュー画面", () => {
     await mount();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "cmp_B" } });
     // ⚠️ 編集の中身の読み込み（edit_read）が後から並ぶことがある＝プレビューへの命令だけで見る
-    expect(calls.filter((c) => c.cmd.startsWith("preview_")).at(-1)).toEqual({
+    expect(calls.filter((c) => c.cmd.startsWith("preview_") && c.cmd !== "preview_bounds").at(-1)).toEqual({
       cmd: "preview_set_composition",
       args: { id: "cmp_B" },
     });
@@ -100,10 +103,12 @@ describe("プレビュー画面", () => {
     await mount();
     const btn = screen.getByTitle("音を消す");
     fireEvent.click(btn);
-    expect(calls.at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: true } });
+    // ⚠️ 最後の命令ではなく、音の命令の最後で見る（枠の問い合わせ・読み込みが後から並ぶことがある）
+    expect(calls.filter((c) => c.cmd === "preview_set_muted").at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: true } });
     expect(screen.getByTitle("音を鳴らす").getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByTitle("音を鳴らす"));
-    expect(calls.at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: false } });
+    // ⚠️ 最後の命令ではなく、音の命令の最後で見る（枠の問い合わせ・読み込みが後から並ぶことがある）
+    expect(calls.filter((c) => c.cmd === "preview_set_muted").at(-1)).toEqual({ cmd: "preview_set_muted", args: { muted: false } });
     act(() =>
       handlers["preview-status"]({ compositionId: "cmp_A", frame: 3, playing: true, fps: 30, dropped: 0, audio: true }),
     );
