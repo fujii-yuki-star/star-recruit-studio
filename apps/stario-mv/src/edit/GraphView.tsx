@@ -13,6 +13,7 @@ import {
 } from "./graph";
 import { keysAt, pathLabel, type KeyPath } from "./keyframes";
 import { frameToX } from "./timelineMath";
+import { withTrial } from "./layerOps";
 import type { Layer, Op } from "./types";
 
 export type GraphMode = "value" | "speed";
@@ -45,9 +46,11 @@ export function GraphView(props: {
   onTrial: (ops: Op[] | null) => void;
   onCommit: (ops: Op[]) => unknown;
 }): React.JSX.Element {
-  const { layer, path, fps, ppf, mode } = props;
+  const { path, fps, ppf, mode } = props;
   const svg = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  // 掴んでいる間は、試しを当てた線で描く（離すまで止まって見えない）
+  const layer = drag && drag.ops.length > 0 ? (withTrial([props.base], drag.ops)[0] ?? props.layer) : props.layer;
   const keys = keysAt(layer, path);
   const width = frameToX(props.durationFrames, ppf);
   const h = Math.max(60, props.height - 28);
@@ -91,6 +94,8 @@ export function GraphView(props: {
   const onMove = (e: React.PointerEvent): void => {
     if (!drag) return;
     const to = at(e, drag.range);
+    // ⚠️ 掴んだときのレイヤーから求める。取っ手を動かしてもキーの時刻と値は変わらないので、試しの絵から求めても同じ数になる
+    //   （変異チェックで「同じ結果」と確かめた）＝試しを重ねて当てないための書き方
     const baseKeys = keysAt(props.base, path);
     let op: Op | null;
     if (drag.kind === "handle") {

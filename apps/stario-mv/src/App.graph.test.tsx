@@ -183,6 +183,30 @@ describe("イージングのグラフ（MV-0015 ⑥）", () => {
     expect(rotKeys(applied()[0])[1].value).toBeCloseTo(45, 9);
   });
 
+  it("掴んでいる間も新しい線で描き、縦の範囲は掴んだときのまま（取っ手が上へはみ出す）", async () => {
+    await openGraphOn("G");
+    const h = screen.getByTestId("graph-handle-out-0-0");
+    const line0 = screen.getByTestId("graph-line-0").getAttribute("points");
+    fireEvent.pointerDown(h, { button: 0, clientX: 0, clientY: 0 });
+    // 値 300（範囲 -9〜99 の上）へ
+    fireEvent.pointerMove(screen.getByTestId("graph-svg"), { clientX: 10, clientY: 16 - ((300 - 99) / 108) * 316 });
+    expect(screen.getByTestId("graph-line-0").getAttribute("points")).not.toBe(line0);
+    expect(Number(screen.getByTestId("graph-handle-out-0-0").getAttribute("cy"))).toBeLessThan(0);
+    await act(async () => {
+      fireEvent.pointerUp(screen.getByTestId("graph-svg"), { clientX: 10, clientY: 0 });
+    });
+  });
+
+  it("キーの無い値の行を押すと案内（グラフは出さない）", async () => {
+    await openGraphOn("G");
+    fireEvent.pointerDown(screen.getByTestId("prop-row-G-/transform/opacity").querySelector(".tl-name") as HTMLElement, {
+      button: 0,
+    });
+    await act(async () => undefined);
+    expect(screen.queryByTestId("graph")).toBeNull();
+    expect(screen.getByText(/値の行（名前か◆）を押すと/)).toBeTruthy();
+  });
+
   it("錠のかかったレイヤーの取っ手とキーは動かない", async () => {
     await openGraphOn("L");
     await dragTo(screen.getByTestId("graph-handle-out-0-0"), 15, 174);
