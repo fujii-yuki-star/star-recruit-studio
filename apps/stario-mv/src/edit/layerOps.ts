@@ -171,6 +171,15 @@ export function parentCandidates(comp: Composition, id: string): Layer[] {
   return comp.layers.filter((l) => !descends(l.id));
 }
 
+/**
+ * プリコンポーズ（MV-0011 決定5）＝選んだものを新しいコンポジションへ移し、入れ子1つに置き換える。
+ * 錠のかかったものは移さない。並びの順で渡す（中の並びもそのまま）。
+ */
+export function precomposeOp(comp: Composition, ids: ReadonlySet<string>, name: string): Op | null {
+  const layerIds = editable(comp, ids).map((l) => l.id);
+  return layerIds.length === 0 ? null : { op: "precompose", layerIds, name };
+}
+
 /** 範囲の選択（`Shift`＝基点からの間を全部）。並びの順で返す。 */
 export function rangeSelect(comp: Composition, anchor: string, to: string): string[] {
   const ids = comp.layers.map((l) => l.id);

@@ -22,6 +22,7 @@ pub const TX_OPS: &[&str] = &[
     "moveLayer",
     "splitLayer",
     "setParent",
+    "precompose",
     "addComposition",
     "updateComposition",
     "removeComposition",
@@ -81,7 +82,16 @@ pub fn apply_ops_warn(
                             .find(|a| a["id"].as_str() == Some(aid))
                             .cloned()
                     });
+                // 入れ子のレイヤー＝中の中心をアンカーに・中の長さ（MV-0011 決定3）
+                let nested = layer
+                    .get("compositionId")
+                    .and_then(Value::as_str)
+                    .and_then(|cid| find_comp(doc, cid))
+                    .map(|i| doc["compositions"][i].clone());
                 let comp = &doc["compositions"][ci];
+                if let Some(n) = &nested {
+                    fill_nested_defaults(&mut layer, comp, n);
+                }
                 fill_layer_defaults(&mut layer, comp, asset.as_ref());
                 let id = layer["id"].as_str().unwrap_or_default().to_string();
                 let layers = comp_layers_mut(doc, ci);
@@ -214,6 +224,105 @@ pub fn apply_ops_warn(
                 }
                 doc["compositions"][ci]["layers"][li]["parentId"] =
                     parent.map_or(Value::Null, Value::String);
+            }
+            "precompose" => {
+                // 選んだレイヤーを新しいコンポジションへ移し、入れ子のレイヤー1つに置き換える（MV-0011 決定5）
+                let ids: Vec<String> = op["layerIds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                let Some(first) = ids.first() else {
+                    return Err(fail(
+                        "layerIds に移すレイヤーを1つ以上書いてください。".into(),
+                    ));
+                };
+                let (ci, _) = find_layer(doc, first).ok_or_else(|| fail(layer_missing(first)))?;
+                for id in &ids {
+                    match find_layer(doc, id) {
+                        Some((c, _)) if c == ci => {}
+                        Some(_) => {
+                            return Err(fail(
+                                "プリコンポーズできるのは同じコンポジションのレイヤーだけです。"
+                                    .into(),
+                            ))
+                        }
+                        None => return Err(fail(layer_missing(id))),
+                    }
+                }
+                let outer = doc["compositions"][ci].clone();
+                let picked: std::collections::HashSet<&str> =
+                    ids.iter().map(String::as_str).collect();
+                let layers = outer["layers"].as_array().cloned().unwrap_or_default();
+                let at = layers
+                    .iter()
+                    .position(|l| picked.contains(l["id"].as_str().unwrap_or("")))
+                    .unwrap_or(0);
+                let (mut moved, mut kept): (Vec<Value>, Vec<Value>) = layers
+                    .into_iter()
+                    .partition(|l| picked.contains(l["id"].as_str().unwrap_or("")));
+                // 親子付けが外と中にまたがるときは切る（知らせる＝見た目が変わりうる）
+                for l in &mut moved {
+                    if let Some(p) = l["parentId"].as_str() {
+                        if !picked.contains(p) {
+                            warnings.push(format!(
+                                "「{}」の親は移さなかったので、親子付けを切りました（見た目が変わることがあります）。",
+                                l["name"].as_str().unwrap_or("")
+                            ));
+                            l["parentId"] = Value::Null;
+                        }
+                    }
+                }
+                for l in &mut kept {
+                    if l["parentId"].as_str().is_some_and(|p| picked.contains(p)) {
+                        warnings.push(format!(
+                            "「{}」の親を入れ子へ移したので、親子付けを切りました（見た目が変わることがあります）。",
+                            l["name"].as_str().unwrap_or("")
+                        ));
+                        l["parentId"] = Value::Null;
+                    }
+                }
+                let comp_new_id = match op.get("id").and_then(Value::as_str) {
+                    Some(g) if mv_core::id::is_valid_id(IdKind::Composition, g) => g.to_string(),
+                    Some(g) => {
+                        return Err(fail(format!(
+                            "id「{g}」はコンポジションの ID の形ではありません。"
+                        )))
+                    }
+                    None => new_id(IdKind::Composition),
+                };
+                let name = op.get("name").and_then(Value::as_str).unwrap_or("入れ子");
+                let inner = json!({
+                    "id": comp_new_id, "name": name,
+                    "width": outer["width"], "height": outer["height"], "fps": outer["fps"],
+                    "durationFrames": outer["durationFrames"], "background": outer["background"],
+                    "markers": [], "layers": moved,
+                });
+                let mut pre =
+                    json!({ "name": name, "type": "precomp", "compositionId": comp_new_id })
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default();
+                if let Some(lid) = op.get("layerId").and_then(Value::as_str) {
+                    pre.insert("id".into(), json!(lid));
+                }
+                fill_nested_defaults(&mut pre, &outer, &inner);
+                fill_layer_defaults(&mut pre, &outer, None);
+                let pre_id = pre["id"].as_str().unwrap_or_default().to_string();
+                kept.insert(at.min(kept.len()), Value::Object(pre));
+                doc["compositions"][ci]["layers"] = Value::Array(kept);
+                compositions_mut(doc).push(inner);
+                created.push(Created {
+                    index,
+                    kind: "composition",
+                    id: comp_new_id,
+                });
+                created.push(Created {
+                    index,
+                    kind: "layer",
+                    id: pre_id,
+                });
             }
             "addComposition" => {
                 let Some(Value::Object(src)) = op.get("composition") else {
@@ -394,6 +503,39 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
         } else {
             merge_patch(t.entry(k.clone()).or_insert(Value::Null), v);
         }
+    }
+}
+
+/// 入れ子のレイヤーの既定（MV-0011 決定3）＝種類・アンカーは中の中心・長さは中の長さ（外の fps に直す・外の終わりで止める）。
+/// ⚠️ [`fill_layer_defaults`] の前に呼ぶ（書かれていない所だけ入れる）。
+pub fn fill_nested_defaults(layer: &mut Map<String, Value>, comp: &Value, nested: &Value) {
+    layer.entry("type").or_insert(json!("precomp"));
+    let fps = |c: &Value| {
+        c["fps"]["num"].as_f64().unwrap_or(0.0) / c["fps"]["den"].as_f64().unwrap_or(1.0)
+    };
+    let comp_dur = comp["durationFrames"].as_i64().unwrap_or(0);
+    let start = layer.get("inFrame").and_then(Value::as_i64).unwrap_or(0);
+    let nf = fps(nested);
+    if nf > 0.0 {
+        let secs = nested["durationFrames"].as_f64().unwrap_or(0.0) / nf;
+        let len = (secs * fps(comp) - 1e-6).ceil().max(1.0) as i64;
+        let out = if start + len <= comp_dur || start >= comp_dur {
+            start + len
+        } else {
+            comp_dur
+        };
+        layer.entry("outFrame").or_insert(json!(out));
+    }
+    let (nw, nh) = (
+        nested["width"].as_f64().unwrap_or(0.0),
+        nested["height"].as_f64().unwrap_or(0.0),
+    );
+    if let Value::Object(t) = layer
+        .entry("transform")
+        .or_insert_with(|| Value::Object(Map::new()))
+    {
+        t.entry("anchor")
+            .or_insert(json!({ "value": [nw / 2.0, nh / 2.0] }));
     }
 }
 

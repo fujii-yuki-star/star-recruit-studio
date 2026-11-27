@@ -6,7 +6,7 @@ import { Splitter } from "./edit/Splitter";
 import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
-import { sequenceOps } from "./edit/layerOps";
+import { precomposeOp, sequenceOps } from "./edit/layerOps";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -146,6 +146,10 @@ export function App(): React.JSX.Element {
         if (edit === "selectAll") setSelectedIds(editComp.layers.map((l) => l.id));
         else if (edit === "snap") setSnapping((v) => !v);
         else if (edit === "undo") void editor.undo();
+        else if (edit === "precompose") {
+          const op = precomposeOp(editComp, selected, "入れ子");
+          if (op) void commit([op]);
+        }
         else if (edit === "redo") void editor.redo();
         else commit(editOps(edit, editComp, selected, frame));
         return;
@@ -170,6 +174,13 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, [comp, togglePlay, editComp, selected, frame, commit, editor]);
 
+  // 入れ子の中を開く（MV-0011 決定5）＝上のコンポジションの選択を切り替える
+  const openComposition = (id: string): void => {
+    setCompId(id);
+    setSelectedIds([]);
+    void previewApi.setComposition(id);
+  };
+
   const pick = async (): Promise<void> => {
     const dir = await previewApi.pickProjectFolder();
     if (dir) await open(dir);
@@ -191,11 +202,7 @@ export function App(): React.JSX.Element {
               コンポジション
               <select
                 value={compId}
-                onChange={(e) => {
-                  setCompId(e.target.value);
-                  setSelectedIds([]);
-                  void previewApi.setComposition(e.target.value);
-                }}
+                onChange={(e) => openComposition(e.target.value)}
               >
                 {project.compositions.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -375,6 +382,17 @@ export function App(): React.JSX.Element {
           </button>
           <button
             type="button"
+            disabled={!editComp || selected.size === 0}
+            onClick={() => {
+              const op = editComp && precomposeOp(editComp, selected, "入れ子");
+              if (op) void commit([op]);
+            }}
+            title="選んだレイヤーを新しいコンポジションへ移し、入れ子1つに置き換える（Ctrl+Shift+C）"
+          >
+            プリコンポーズ
+          </button>
+          <button
+            type="button"
             disabled={!editComp || selected.size < 2}
             onClick={() => editComp && commit(sequenceOps(editComp, selected))}
             title="選んだレイヤーを、時間の順に隙間なく並べ直す"
@@ -407,6 +425,7 @@ export function App(): React.JSX.Element {
             onTrial={editor.trial}
             onCommit={commit}
             assetDragging={dragAsset != null}
+            onOpenNested={openComposition}
             onDropAsset={(f) => {
               if (dragAsset) void commit([placeAssetOp(dragAsset, f, compId)]);
             }}

@@ -241,6 +241,7 @@ pub fn writing_path(out: &Path) -> PathBuf {
 }
 
 /// 音のレイヤーと、音を持つ映像のレイヤーを、書き出しに混ぜる音へ（MV-0006 決定5）。プレビューの音も同じものを使う。
+/// 入れ子の中の音も、外の時刻へずらして入れ子のレイヤーの見える範囲で切って混ぜる（MV-0011 決定4）。
 pub fn audio_inputs(
     project: &Project,
     comp: &mv_core::model::Composition,
@@ -248,9 +249,59 @@ pub fn audio_inputs(
     fps: f64,
     ffmpeg: &Path,
 ) -> Result<Vec<AudioInput>, ExportError> {
+    audio_inputs_at(project, comp, project_dir, fps, ffmpeg, 0)
+}
+
+fn audio_inputs_at(
+    project: &Project,
+    comp: &mv_core::model::Composition,
+    project_dir: &Path,
+    fps: f64,
+    ffmpeg: &Path,
+    depth: u32,
+) -> Result<Vec<AudioInput>, ExportError> {
     let any_solo = comp.layers.iter().any(|l| l.solo == Some(true));
     let mut v = Vec::new();
     for l in &comp.layers {
+        if l.layer_type == LayerType::Precomp {
+            if !l.enabled
+                || (any_solo && l.solo != Some(true))
+                || l.audio.as_ref().is_some_and(|a| a.muted)
+            {
+                continue;
+            }
+            if depth + 1 > mv_render::MAX_NEST_DEPTH {
+                return Err(ExportError::Render(RenderError::Eval(format!(
+                    "「{}」の入れ子が深すぎます（{} 段まで）。",
+                    l.name,
+                    mv_render::MAX_NEST_DEPTH
+                ))));
+            }
+            let id = l.composition_id.as_deref().unwrap_or_default();
+            let inner = project
+                .compositions
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| ExportError::Render(RenderError::CompositionNotFound(id.into())))?;
+            let inner_fps = f64::from(inner.fps.num) / f64::from(inner.fps.den);
+            let gain = l
+                .audio
+                .as_ref()
+                .map(|a| mv_core::eval::number_at(&a.volume_db, 0.0))
+                .transpose()
+                .map_err(|e| ExportError::Render(RenderError::Eval(format!("{e:?}"))))?
+                .unwrap_or(0.0);
+            // 中の 0 秒＝外の startFrame。見える範囲（書き出しの範囲の中）で切る
+            let offset = l.start_frame as f64 / fps;
+            let lo = l.in_frame.max(0) as f64 / fps;
+            let hi = l.out_frame.min(comp.duration_frames as i64) as f64 / fps;
+            for i in audio_inputs_at(project, inner, project_dir, inner_fps, ffmpeg, depth + 1)? {
+                if let Some(c) = place_nested(&i, offset, lo, hi, gain) {
+                    v.push(c);
+                }
+            }
+            continue;
+        }
         if !matches!(l.layer_type, LayerType::Audio | LayerType::Video)
             || !l.enabled
             || (any_solo && l.solo != Some(true))
@@ -320,6 +371,30 @@ pub fn audio_inputs(
         });
     }
     Ok(v)
+}
+
+/// 入れ子の中の音を外の時刻へ置き直す（`offset` だけ後ろへ・外の `lo`〜`hi` 秒で切る・`gain_db` を足す）。範囲に入らなければ None。
+pub fn place_nested(
+    i: &AudioInput,
+    offset: f64,
+    lo: f64,
+    hi: f64,
+    gain_db: f64,
+) -> Option<AudioInput> {
+    let at = i.at_sec + offset;
+    let start = at.max(lo);
+    let end = (at + i.duration_sec).min(hi);
+    if end <= start {
+        return None;
+    }
+    Some(AudioInput {
+        path: i.path.clone(),
+        source_start_sec: i.source_start_sec + (start - at),
+        duration_sec: end - start,
+        at_sec: start,
+        volume_db: i.volume_db + gain_db,
+        channels: i.channels,
+    })
 }
 
 /// プレビューの音＝コンポジション全体を、書き出しと同じ混ぜ方で混ぜた音（ステレオ・`sample_rate`・左右交互の f32）。
@@ -421,7 +496,42 @@ pub fn parse_channels(info: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_channels;
+    use super::{parse_channels, place_nested, AudioInput};
+
+    fn input(at: f64, dur: f64) -> AudioInput {
+        AudioInput {
+            path: "a.wav".into(),
+            source_start_sec: 1.0,
+            duration_sec: dur,
+            at_sec: at,
+            volume_db: -3.0,
+            channels: 1,
+        }
+    }
+
+    #[test]
+    fn 入れ子の音は外の時刻へずらして見える範囲で切る() {
+        // 中の 0.2 秒から 1 秒鳴る音を、0.5 秒ずらす＝外の 0.7〜1.7。見える範囲 1.0〜1.5 で切る
+        let c = place_nested(&input(0.2, 1.0), 0.5, 1.0, 1.5, -6.0).unwrap();
+        assert!((c.at_sec - 1.0).abs() < 1e-9);
+        assert!((c.duration_sec - 0.5).abs() < 1e-9);
+        assert!(
+            (c.source_start_sec - 1.3).abs() < 1e-9,
+            "素材も切った分だけ先から"
+        );
+        assert!(
+            (c.volume_db - (-9.0)).abs() < 1e-9,
+            "入れ子のレイヤーの音量を足す"
+        );
+        // 範囲に入らなければ無し
+        assert!(place_nested(&input(0.2, 1.0), 0.5, 2.0, 3.0, 0.0).is_none());
+        // 切らなくてよいときはそのまま（ずらすだけ）
+        let c = place_nested(&input(0.0, 1.0), 2.0, 0.0, 10.0, 0.0).unwrap();
+        assert_eq!(
+            (c.at_sec, c.duration_sec, c.source_start_sec),
+            (2.0, 1.0, 1.0)
+        );
+    }
 
     #[test]
     fn 音の数を読む() {

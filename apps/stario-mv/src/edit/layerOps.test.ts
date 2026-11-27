@@ -16,6 +16,7 @@ import {
   mergePatch,
   setParentOp,
   parentCandidates,
+  precomposeOp,
   trimOutOps,
   trimToPlayheadOps,
 } from "./layerOps";
@@ -163,6 +164,15 @@ describe("親子付け（MV-0010 決定5）", () => {
     ]);
     expect(parentCandidates(c, "A").map((l) => l.id)).toEqual(["D"]);
     expect(parentCandidates(c, "C").map((l) => l.id)).toEqual(["A", "B", "D"]);
+  });
+});
+
+describe("プリコンポーズ（MV-0011 決定5）", () => {
+  it("選んだものを並びの順で移す（錠は移さない・何も無ければ送らない）", () => {
+    const c = comp([layer("A", 0, 10), layer("L", 0, 10, { locked: true }), layer("B", 0, 10), layer("C", 0, 10)]);
+    expect(precomposeOp(c, set("C", "A", "L"), "入れ子")).toEqual({ op: "precompose", layerIds: ["A", "C"], name: "入れ子" });
+    expect(precomposeOp(c, set("L"), "入れ子")).toBeNull();
+    expect(precomposeOp(c, set(), "入れ子")).toBeNull();
   });
 });
 

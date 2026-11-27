@@ -29,6 +29,8 @@ export interface Layer {
   startFrame: number;
   /** 親（同じコンポジションのレイヤー・MV-0010 決定5）。 */
   parentId?: string | null;
+  /** 入れ子のレイヤーが指すコンポジション（MV-0011）。 */
+  compositionId?: string;
   blendMode?: BlendMode;
   transform?: Partial<Record<TransformKey, Animatable>>;
   text?: { text: string; fontFamily: string; fontSize: number; fill: Color } & Record<string, unknown>;
@@ -141,7 +143,8 @@ export type Op =
   | { op: "removeLayer"; layerId: string }
   | { op: "moveLayer"; layerId: string; index: number }
   | { op: "splitLayer"; layerId: string; frame: number }
-  | { op: "setParent"; layerId: string; parentId: string | null; frame: number };
+  | { op: "setParent"; layerId: string; parentId: string | null; frame: number }
+  | { op: "precompose"; layerIds: string[]; name?: string };
 
 /** レイヤーを直す編集（値の欄の操作は全部これ）。 */
 export type UpdateOp = Extract<Op, { op: "updateLayer" }>;

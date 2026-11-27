@@ -37,6 +37,9 @@ const { App, APP_TITLE } = await import("./App");
 async function mount(): Promise<void> {
   render(<App />);
   await screen.findByText("見本");
+  // ⚠️ 描いたあとの effect（キーの受け口の付け替え）まで流してから操作する＝「見本」が出た直後は、
+  //   動画を開く前の受け口のままのことがあり、キーが黙って捨てられた（たまに落ちた＝2026-11-27）
+  await act(async () => undefined);
 }
 
 describe("プレビュー画面", () => {

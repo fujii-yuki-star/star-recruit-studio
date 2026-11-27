@@ -95,7 +95,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["op", "layer"],
-                "description": "レイヤーを足す。layer には少なくとも name と、type と種類ごとの中身（text / shape / solid）か、素材の assetId（type は省ける＝映像・連番→video・画像・SVG→image・音→audio）を書く。書かなかった項目は既定（有効・長さはコンポジションの全体〔映像・連番・音は素材の長さまで〕・layer に inFrame を書けばそこから始まり、素材の時刻 0〔startFrame〕もそこ・終わりは素材の長さの分だけ後〔コンポジションの終わりで止める〕・位置は中心・アンカーは単色と素材なら中身の中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
+                "description": "レイヤーを足す。layer には少なくとも name と、type と種類ごとの中身（text / shape / solid）か、素材の assetId（type は省ける＝映像・連番→video・画像・SVG→image・音→audio）を書く。書かなかった項目は既定（有効・長さはコンポジションの全体〔映像・連番・音は素材の長さまで〕・入れ子〔type precomp・compositionId〕はアンカーが中の中心・長さが中の長さ・layer に inFrame を書けばそこから始まり、素材の時刻 0〔startFrame〕もそこ・終わりは素材の長さの分だけ後〔コンポジションの終わりで止める〕・位置は中心・アンカーは単色と素材なら中身の中心・単色の大きさはコンポジションと同じ・大きさ1倍・不透明度1・描画モード normal）。index は置く場所（0＝最前面・既定 0）。",
                 "properties": {
                   "op": { "const": "addLayer" },
                   "compositionId": { "type": "string", "description": "省略時は mainCompositionId。" },
@@ -158,6 +158,19 @@
                   "parentId": { "type": ["string", "null"] },
                   "keepAppearance": { "type": "boolean" },
                   "frame": { "type": "integer" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layerIds"],
+                "description": "プリコンポーズ（MV-0011 決定5＝AE の「すべての属性を新規コンポジションに移動」）。layerIds（同じコンポジション）を新しいコンポジション（外と同じ大きさ・fps・長さ・背景）へ並び・時刻・変形のまま移し、外では入れ子のレイヤー1つ（選んだうちいちばん手前の位置・見える範囲は全体・アンカーと位置は中心＝見た目は変わらない）に置き換える。親子付けが外と中にまたがるときは切って warnings で知らせる。新しいコンポジションと入れ子のレイヤーの ID は created に返る（id・layerId を渡せばそれを使う）。name は両方の名前（既定「入れ子」）。",
+                "properties": {
+                  "op": { "const": "precompose" },
+                  "layerIds": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                  "name": { "type": "string", "minLength": 1 },
+                  "id": { "type": "string" },
+                  "layerId": { "type": "string" }
                 }
               },
               {

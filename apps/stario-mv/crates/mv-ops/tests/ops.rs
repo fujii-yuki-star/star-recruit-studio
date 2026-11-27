@@ -958,3 +958,175 @@ fn 親を付けられないときと保てないとき() {
         "保っていない＝親の変形がそのまま掛かる"
     );
 }
+
+fn frame_pixels(ops: &mut Ops, dir: &Path, frame: i64) -> Vec<u8> {
+    let out = ops
+        .call(
+            "renderFrame",
+            &json!({ "project": p(dir), "frame": frame, "maxSize": 0 }),
+        )
+        .unwrap();
+    image::load_from_memory(&out.image.unwrap().bytes)
+        .unwrap()
+        .to_rgba8()
+        .into_raw()
+}
+
+/// MV-0011 決定5：プリコンポーズしても絵は変わらない（中へ並び・時刻・変形のまま移し、外は中心に置いた入れ子1つ）。
+#[test]
+fn プリコンポーズしても絵は変わらない() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    let before: Vec<Vec<u8>> = [0, 10, 25]
+        .iter()
+        .map(|&f| frame_pixels(&mut ops, &dir, f))
+        .collect();
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "precompose", "layerIds": [TITLE, BG], "name": "まとめ" }]}),
+    );
+    assert_eq!(out.json["applied"], true, "{}", out.json);
+    let created = out.json["created"].as_array().unwrap();
+    let (cid, lid) = (
+        created[0]["id"].as_str().unwrap(),
+        created[1]["id"].as_str().unwrap(),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    let outer = &doc["compositions"][0];
+    assert_eq!(outer["layers"].as_array().unwrap().len(), 1);
+    let pre = &outer["layers"][0];
+    assert_eq!(
+        (
+            pre["id"].as_str(),
+            pre["type"].as_str(),
+            pre["compositionId"].as_str()
+        ),
+        (Some(lid), Some("precomp"), Some(cid))
+    );
+    assert_eq!(pre["name"], "まとめ");
+    let inner = doc["compositions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == cid)
+        .unwrap();
+    let names: Vec<&str> = inner["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["見出し", "背景"], "並びはそのまま");
+    assert_eq!(
+        (inner["width"].clone(), inner["durationFrames"].clone()),
+        (outer["width"].clone(), outer["durationFrames"].clone())
+    );
+    for (i, &f) in [0, 10, 25].iter().enumerate() {
+        let after = frame_pixels(&mut ops, &dir, f);
+        let diff = before[i]
+            .iter()
+            .zip(&after)
+            .filter(|(a, b)| a.abs_diff(**b) > 2)
+            .count();
+        assert!(diff * 1000 < after.len(), "フレーム {f}：違う画素 {diff}");
+    }
+    assert_eq!(out.json["history"]["undo"], "AI：プリコンポーズ");
+}
+
+/// 親子付けが外と中にまたがるときは切って知らせる・別のコンポジションは混ぜない・入れ子のレイヤーの既定。
+#[test]
+fn プリコンポーズの親子と入れ子の既定() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "parentId": BG } }]}),
+    );
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "precompose", "layerIds": [TITLE] }]}),
+    );
+    assert!(
+        out.json["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("親子付けを切りました"),
+        "{}",
+        out.json["warnings"]
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    let inner = &doc["compositions"][1];
+    assert_eq!(inner["layers"][0]["parentId"], Value::Null);
+    // 入れ子は、選んだうちいちばん手前の位置（見出しの所＝背景より手前）
+    let outer: Vec<&str> = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(outer, ["precomp", "solid"]);
+    assert_eq!(inner["name"], "入れ子");
+    // 外に残した子の親を中へ移す場合も切る
+    let (_r2, dir2) = sample();
+    tx(
+        &mut ops,
+        &dir2,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "parentId": BG } }]}),
+    );
+    let out = tx(
+        &mut ops,
+        &dir2,
+        json!({ "ops": [{ "op": "precompose", "layerIds": [BG] }]}),
+    );
+    assert!(
+        out.json["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("親を入れ子へ移した"),
+        "{}",
+        out.json["warnings"]
+    );
+    // 別のコンポジションのレイヤーは混ぜない
+    let other = mv_core::id::new_id(mv_core::id::IdKind::Layer);
+    let cid = mv_core::id::new_id(mv_core::id::IdKind::Composition);
+    tx(
+        &mut ops,
+        &dir2,
+        json!({ "ops": [
+            { "op": "addComposition", "composition": { "id": cid, "name": "別", "width": 64, "height": 32, "fps": { "num": 15, "den": 1 }, "durationFrames": 30 } },
+            { "op": "addLayer", "compositionId": cid, "layer": { "id": other, "name": "x", "type": "null" } },
+        ]}),
+    );
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir2), "ops": [{ "op": "precompose", "layerIds": [TITLE, other] }] }))
+        .unwrap_err();
+    assert!(e.message.contains("同じコンポジション"), "{}", e.message);
+    // 入れ子のレイヤーの既定＝アンカーは中の中心・長さは中の長さ（15fps の 30 コマ＝2 秒＝外 30fps の 60 コマ）
+    let out = tx(
+        &mut ops,
+        &dir2,
+        json!({ "ops": [{ "op": "addLayer", "layer": { "name": "入れ子", "compositionId": cid, "inFrame": 10 } }]}),
+    );
+    let lid = out.json["created"][0]["id"].as_str().unwrap().to_string();
+    let (doc, _) = read_doc(&dir2).unwrap();
+    let l = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == lid.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(l["type"], "precomp");
+    assert_eq!(l["transform"]["anchor"]["value"], json!([32.0, 16.0]));
+    assert_eq!(
+        (
+            l["inFrame"].as_i64(),
+            l["outFrame"].as_i64(),
+            l["startFrame"].as_i64()
+        ),
+        (Some(10), Some(70), Some(10))
+    );
+}
