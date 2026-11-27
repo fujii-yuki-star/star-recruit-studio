@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  EASE_IN,
+  EASE_OUT,
+  adjacentKeyFrame,
   clickKey,
+  easeOps,
+  toLinearOps,
+  toggleHoldOps,
   hasAnimated,
   keyId,
   liveKeys,
@@ -164,5 +170,75 @@ describe("キーを動かす・消す（MV-0014 決定2）", () => {
       { op: "updateLayer", layerId: "A", patch: { transform: { position: { value: [50, 50], keyframes: null } } } },
     ]);
     expect(removeKeysOps(c, [pos(7)])).toEqual([]);
+  });
+});
+
+type PosOp = { patch: { transform: { position: { keyframes: Keyframe[] } } } };
+const posKeys = (ops: unknown[]): Keyframe[] => (ops[0] as PosOp).patch.transform.position.keyframes;
+
+describe("補間の切り替え（MV-0014 決定3）", () => {
+  // 0 直線・10 止める・20 直線（取っ手つき）
+  const withEase = (): Composition =>
+    comp([
+      layer("A", {
+        transform: {
+          position: {
+            keyframes: [kf(0, [0, 0]), kf(10, [100, 0], "hold"), { ...kf(20, [50, 50], "bezier"), easeOut: [0.1, 0.2] }],
+          },
+        },
+      }),
+    ]);
+
+  it("Ctrl+Alt+H＝全部止めるなら直線へ・そうでなければ全部止める（取っ手は外す）", () => {
+    const c = withEase();
+    expect(posKeys(toggleHoldOps(c, [pos(0), pos(20)])).map((k) => k.interpolation)).toEqual(["hold", "hold", "hold"]);
+    expect(posKeys(toggleHoldOps(c, [pos(0), pos(20)]))[2]).toEqual(kf(20, [50, 50], "hold"));
+    expect(posKeys(toggleHoldOps(c, [pos(10)])).map((k) => k.interpolation)).toEqual(["linear", "linear", "bezier"]);
+    expect(toggleHoldOps(c, [pos(7)])).toEqual([]);
+    expect(toggleHoldOps(comp([layer("A", { locked: true })]), [pos(0)])).toEqual([]);
+  });
+
+  it("Ctrl を押しながら◆＝直線に戻す（取っ手も外す）", () => {
+    expect(posKeys(toLinearOps(withEase(), [pos(20)]))[2]).toEqual(kf(20, [50, 50]));
+  });
+
+  it("F9＝出は曲線と easeOut・入りは easeIn と前の直線のキーを曲線に（前が止めるなら変えない）", () => {
+    const c = comp([layer("A")]);
+    // 0 直線・10 止める・20 直線
+    const both = posKeys(easeOps(c, [pos(20)], "both"));
+    expect(both[2]).toEqual({ ...kf(20, [50, 50], "bezier"), easeOut: EASE_OUT, easeIn: EASE_IN });
+    expect(both[1].interpolation).toBe("hold");
+    const mid = posKeys(easeOps(comp([layer("A", { transform: { position: { keyframes: [kf(0, 0), kf(10, 1), kf(20, 2)] } } })]), [pos(10)], "both"));
+    expect(mid[0]).toEqual(kf(0, 0, "bezier"));
+    expect(mid[1]).toEqual({ ...kf(10, 1, "bezier"), easeOut: EASE_OUT, easeIn: EASE_IN });
+    expect(mid[2]).toEqual(kf(20, 2));
+    // 入りだけ＝そのキーの出は変えない・出だけ＝前のキーは変えない
+    const inOnly = posKeys(easeOps(comp([layer("A", { transform: { position: { keyframes: [kf(0, 0), kf(10, 1), kf(20, 2)] } } })]), [pos(10)], "in"));
+    expect(inOnly[1]).toEqual({ ...kf(10, 1), easeIn: EASE_IN });
+    expect(inOnly[0].interpolation).toBe("bezier");
+    const outOnly = posKeys(easeOps(comp([layer("A", { transform: { position: { keyframes: [kf(0, 0), kf(10, 1), kf(20, 2)] } } })]), [pos(10)], "out"));
+    expect(outOnly[1]).toEqual({ ...kf(10, 1, "bezier"), easeOut: EASE_OUT });
+    expect(outOnly[0]).toEqual(kf(0, 0));
+    // 最初のキーの入り＝前が無い（そのキーだけ）
+    expect(posKeys(easeOps(c, [pos(0)], "in"))[0]).toEqual({ ...kf(0, [0, 0]), easeIn: EASE_IN });
+  });
+});
+
+describe("J／K（MV-0014 決定4）", () => {
+  const c = (): Composition =>
+    comp([
+      layer("A"),
+      layer("B", {
+        transform: { opacity: { keyframes: [kf(3, 0), kf(40, 1)] } },
+        timeRemap: { keyframes: [kf(50, 0), kf(60, 1)] },
+      }),
+    ]);
+  it("選んだレイヤー（無ければ全部）の、キーのある全部の値（タイムリマップも）", () => {
+    expect(adjacentKeyFrame(c(), new Set(), 10, 1)).toBe(15);
+    expect(adjacentKeyFrame(c(), new Set(), 10, -1)).toBe(5);
+    expect(adjacentKeyFrame(c(), new Set(["B"]), 10, 1)).toBe(40);
+    expect(adjacentKeyFrame(c(), new Set(["B"]), 40, 1)).toBe(50);
+    expect(adjacentKeyFrame(c(), new Set(["B"]), 3, -1)).toBeNull();
+    expect(adjacentKeyFrame(c(), new Set(["A"]), 20, 1)).toBeNull();
   });
 });

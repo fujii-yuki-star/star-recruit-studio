@@ -21,6 +21,7 @@ import {
   moveKeysOps,
   movedKeyIds,
   pathLabel,
+  toLinearOps,
   propRowsFor,
   type KeyPath,
   type KeyRef,
@@ -246,7 +247,13 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     if (e.button !== 0) return;
     e.stopPropagation();
     const id = keyId({ layerId: l.id, path, frame });
-    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    // Ctrl を押しながら＝直線に戻す（AE の型・MV-0014 決定3）。選択は Shift で足す・外す
+    if (e.ctrlKey || e.metaKey) {
+      const ops = toLinearOps(comp, [{ layerId: l.id, path, frame }]);
+      if (ops.length > 0) props.onCommit(ops);
+      return;
+    }
+    const additive = e.shiftKey;
     const next = clickKey(selectedKeys, id, additive);
     props.onSelectKeys?.(next);
     if (additive || l.locked) return;
@@ -417,7 +424,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                         data-testid={`kf-${l.id}-${row.path}-${kf.frame}`}
                         aria-label={`${label}のキー（${kf.frame}）`}
                         aria-pressed={keySel.has(id)}
-                        title={`${label}のキー（${kf.frame}）＝押して選ぶ・掴んで動かす・Delete で消す`}
+                        title={`${label}のキー（${kf.frame}）＝押して選ぶ（Shift で足す）・掴んで動かす・Delete で消す・Ctrl で直線に・F9 でイージーイーズ・Ctrl+Alt+H で止める`}
                         style={{ left: frameToX(kf.frame, ppf) }}
                         onPointerDown={(e) => startKey(e, l, row.path, kf.frame)}
                       />

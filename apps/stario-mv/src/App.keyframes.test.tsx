@@ -161,11 +161,11 @@ describe("レイヤー＋キーフレームの画面（MV-0014 ⑤-1）", () => 
     expect(screen.queryByTestId(`prop-row-K-${POS}`)).toBeNull();
   });
 
-  it("◆を押して選ぶ・Ctrl で足す・何も無い所で外す", async () => {
+  it("◆を押して選ぶ・Shift で足す・何も無い所で外す", async () => {
     await openK();
     pressKey(key("K", POS, 10), 10);
     expect(key("K", POS, 10).getAttribute("aria-pressed")).toBe("true");
-    pressKey(key("K", ROT, 5), 5, { ctrlKey: true });
+    pressKey(key("K", ROT, 5), 5, { shiftKey: true });
     expect(key("K", POS, 10).getAttribute("aria-pressed")).toBe("true");
     expect(key("K", ROT, 5).getAttribute("aria-pressed")).toBe("true");
     const track = screen.getByTestId(`prop-row-K-${POS}`).querySelector(".tl-track") as HTMLElement;
@@ -210,7 +210,7 @@ describe("レイヤー＋キーフレームの画面（MV-0014 ⑤-1）", () => 
   it("選んだ◆の1つを素で押して動かさずに離す＝それだけを選び直す（取引は無い）", async () => {
     await openK();
     pressKey(key("K", POS, 0), 0);
-    pressKey(key("K", POS, 20), 20, { ctrlKey: true });
+    pressKey(key("K", POS, 20), 20, { shiftKey: true });
     pressKey(key("K", POS, 20), 20);
     expect(key("K", POS, 20).getAttribute("aria-pressed")).toBe("true");
     expect(key("K", POS, 0).getAttribute("aria-pressed")).toBe("false");
@@ -275,5 +275,112 @@ describe("レイヤー＋キーフレームの画面（MV-0014 ⑤-1）", () => 
       fireEvent.pointerUp(tl(), { clientY: 7 * rowH });
     });
     expect(applied()).toEqual([[{ op: "moveLayer", layerId: "K", index: 2 }]]);
+  });
+});
+
+describe("補間の切り替え・J／K（MV-0014 ⑤-2）", () => {
+  beforeEach(() => {
+    calls.length = 0;
+  });
+  afterEach(cleanup);
+
+  const posAfter = (n: number): unknown => (applied()[n] as { patch: { transform: { position: unknown } } }[])[0].patch.transform.position;
+
+  it("F9＝選んだキーをイージーイーズ（前の直線のキーは曲線に）・Shift+F9＝入り・Ctrl+Shift+F9＝出", async () => {
+    await openK();
+    pressKey(key("K", POS, 20), 20);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "F9" });
+    });
+    // 前（10）は止める＝変えない
+    expect(posAfter(0)).toEqual({
+      keyframes: [
+        { frame: 0, value: [0, 0], interpolation: "linear" },
+        { frame: 10, value: [100, 0], interpolation: "hold" },
+        { frame: 20, value: [50, 50], interpolation: "bezier", easeOut: [1 / 3, 0], easeIn: [2 / 3, 1] },
+      ],
+    });
+    pressKey(key("K", POS, 0), 0);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "F9", shiftKey: true });
+    });
+    expect(posAfter(1)).toEqual({
+      keyframes: [
+        { frame: 0, value: [0, 0], interpolation: "linear", easeIn: [2 / 3, 1] },
+        { frame: 10, value: [100, 0], interpolation: "hold" },
+        { frame: 20, value: [50, 50], interpolation: "bezier" },
+      ],
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "F9", shiftKey: true, ctrlKey: true });
+    });
+    expect(posAfter(2)).toEqual({
+      keyframes: [
+        { frame: 0, value: [0, 0], interpolation: "bezier", easeOut: [1 / 3, 0] },
+        { frame: 10, value: [100, 0], interpolation: "hold" },
+        { frame: 20, value: [50, 50], interpolation: "bezier" },
+      ],
+    });
+    // Ctrl+F9 は何もしない
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "F9", ctrlKey: true });
+    });
+    expect(applied()).toHaveLength(3);
+  });
+
+  it("Ctrl+Alt+H＝止める⇔直線・Ctrl を押しながら◆＝直線に戻す（選択は変えない）", async () => {
+    await openK();
+    pressKey(key("K", POS, 0), 0);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "h", ctrlKey: true, altKey: true });
+    });
+    expect(posAfter(0)).toEqual({
+      keyframes: [
+        { frame: 0, value: [0, 0], interpolation: "hold" },
+        { frame: 10, value: [100, 0], interpolation: "hold" },
+        { frame: 20, value: [50, 50], interpolation: "bezier" },
+      ],
+    });
+    await act(async () => {
+      fireEvent.pointerDown(key("K", POS, 20), { button: 0, clientX: 20, ctrlKey: true });
+    });
+    expect(posAfter(1)).toEqual({
+      keyframes: [
+        { frame: 0, value: [0, 0], interpolation: "linear" },
+        { frame: 10, value: [100, 0], interpolation: "hold" },
+        { frame: 20, value: [50, 50], interpolation: "linear" },
+      ],
+    });
+    expect(key("K", POS, 0).getAttribute("aria-pressed")).toBe("true");
+    expect(key("K", POS, 20).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("キーが選ばれていなければ、補間のキーは何も送らない", async () => {
+    await openK();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "F9" });
+      fireEvent.keyDown(window, { key: "h", ctrlKey: true, altKey: true });
+    });
+    expect(applied()).toEqual([]);
+  });
+
+  it("J／K＝前／次のキーへ（選んだレイヤー・無ければ全部）", async () => {
+    await mount();
+    const seeks = (): unknown[] => calls.filter((c) => c.cmd === "preview_seek").map((c) => c.args?.frame);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "k" });
+    });
+    // 全部＝L の 3 がいちばん近い
+    expect(seeks()).toEqual([3]);
+    click("K");
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "k" });
+    });
+    expect(seeks()).toEqual([3, 5]);
+    // 前は無い＝動かさない
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "j" });
+    });
+    expect(seeks()).toEqual([3, 5]);
   });
 });

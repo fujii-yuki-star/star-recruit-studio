@@ -180,3 +180,97 @@ export function clickKey(selected: ReadonlySet<string>, id: string, additive: bo
   if (additive) return selected.has(id) ? [...selected].filter((x) => x !== id) : [...selected, id];
   return selected.has(id) ? [...selected] : [id];
 }
+
+/** 選んだキーを、値ごとに並びのまま書き換えて差分にする（錠は除く）。`change` は並び全体と選んだ番号を受け取って新しい並びを返す。 */
+function rewrite(
+  comp: Composition,
+  keys: readonly KeyRef[],
+  change: (all: Keyframe[], picked: Set<number>) => Keyframe[],
+): Op[] {
+  const patches = new Map<string, Record<string, unknown>[]>();
+  for (const { l, path, frames } of groups(comp, keys)) {
+    const all = keysAt(l, path).map((k) => ({ ...k }));
+    const picked = new Set(all.flatMap((k, i) => (frames.has(k.frame) ? [i] : [])));
+    if (picked.size === 0) continue;
+    push(patches, l.id, nestPatch(path, { keyframes: change(all, picked) }));
+  }
+  return toOps(patches);
+}
+
+/** 取っ手を外した、そのキーの補間だけを替えた写し。 */
+function withInterp(k: Keyframe, interpolation: Keyframe["interpolation"]): Keyframe {
+  const { easeIn: _in, easeOut: _out, ...rest } = k;
+  return { ...rest, interpolation };
+}
+
+/**
+ * `Ctrl+Alt+H`＝止める⇔直線（MV-0014 決定3）。選んだキーが全部「止める」なら直線へ、そうでなければ全部「止める」へ（まとめて揃える）。
+ * 取っ手は外す（止める・直線は取っ手を使わない）。
+ */
+export function toggleHoldOps(comp: Composition, keys: readonly KeyRef[]): Op[] {
+  const picked = liveKeysIn(comp, keys);
+  const allHold = picked.length > 0 && picked.every((k) => k.interpolation === "hold");
+  return rewrite(comp, keys, (all, sel) => all.map((k, i) => (sel.has(i) ? withInterp(k, allHold ? "linear" : "hold") : k)));
+}
+
+/** `Ctrl` を押しながら◆＝直線に戻す（取っ手も外す）。 */
+export function toLinearOps(comp: Composition, keys: readonly KeyRef[]): Op[] {
+  return rewrite(comp, keys, (all, sel) => all.map((k, i) => (sel.has(i) ? withInterp(k, "linear") : k)));
+}
+
+/** イージーイーズの取っ手（速さ 0・影響 33%＝AE の既定）。 */
+export const EASE_OUT: [number, number] = [1 / 3, 0];
+export const EASE_IN: [number, number] = [2 / 3, 1];
+
+/** どちらの側に掛けるか（`F9`＝両方・`Shift+F9`＝入り・`Ctrl+Shift+F9`＝出）。 */
+export type EaseSide = "both" | "in" | "out";
+
+/**
+ * イージーイーズ（MV-0014 決定3）。出＝そのキーを曲線にして `easeOut`。入り＝`easeIn` を置き、前のキーが直線なら曲線にする
+ * （入りは前のキーの出の補間で決まる＝前のキーの取っ手は書かない＝直線と同じ）。前のキーが「止める」なら変えない（止めるが勝つ＝AE と同じ）。
+ */
+export function easeOps(comp: Composition, keys: readonly KeyRef[], side: EaseSide): Op[] {
+  return rewrite(comp, keys, (all, sel) => {
+    const out = all.map((k) => ({ ...k }));
+    for (const i of sel) {
+      if (side !== "in") out[i] = { ...out[i], interpolation: "bezier", easeOut: EASE_OUT };
+      if (side !== "out") {
+        out[i] = { ...out[i], easeIn: EASE_IN };
+        const prev = out[i - 1];
+        if (prev && prev.interpolation === "linear") out[i - 1] = { ...prev, interpolation: "bezier" };
+      }
+    }
+    return out;
+  });
+}
+
+/** 選んだキーの中身（今もあるものだけ）。 */
+function liveKeysIn(comp: Composition, keys: readonly KeyRef[]): Keyframe[] {
+  return keys.flatMap((k) => {
+    const l = comp.layers.find((x) => x.id === k.layerId);
+    const kf = l ? keysAt(l, k.path).find((x) => x.frame === k.frame) : undefined;
+    return kf ? [kf] : [];
+  });
+}
+
+/**
+ * `J`／`K`＝前／次のキーの時刻（MV-0014 決定4）。選んだレイヤー（無ければ全部）の、キーのある全部の値（タイムリマップも）。
+ * ⚠️ 開いているかは見ない＝キーがあるのは必ず「キーのある値」の行なので、開き方で結果は変わらない。無ければ null。
+ */
+export function adjacentKeyFrame(
+  comp: Composition,
+  selected: ReadonlySet<string>,
+  frame: number,
+  dir: -1 | 1,
+): number | null {
+  const layers = selected.size > 0 ? comp.layers.filter((l) => selected.has(l.id)) : comp.layers;
+  const frames: number[] = [];
+  for (const l of layers) {
+    for (const p of propRowsFor(l, "animated")) {
+      for (const k of keysAt(l, p)) frames.push(k.frame);
+    }
+  }
+  const c = dir < 0 ? frames.filter((f) => f < frame) : frames.filter((f) => f > frame);
+  if (c.length === 0) return null;
+  return dir < 0 ? Math.max(...c) : Math.min(...c);
+}

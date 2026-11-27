@@ -7,7 +7,17 @@ import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
 import { compBlurOp, precomposeOp, sequenceOps, toggleTimeRemapOps } from "./edit/layerOps";
-import { keyId, liveKeys, removeKeysOps, revealAnimated, toggleReveal, type Reveal } from "./edit/keyframes";
+import {
+  adjacentKeyFrame,
+  easeOps,
+  keyId,
+  liveKeys,
+  removeKeysOps,
+  revealAnimated,
+  toggleHoldOps,
+  toggleReveal,
+  type Reveal,
+} from "./edit/keyframes";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -165,6 +175,14 @@ export function App(): React.JSX.Element {
           if (ops.length > 0) void commit(ops);
         }
         else if (edit === "reveal") setRevealed((r) => revealAnimated(r, editComp, selected));
+        else if (edit === "hold") void commit(toggleHoldOps(editComp, selectedKeys));
+        else if (edit === "easeBoth") void commit(easeOps(editComp, selectedKeys, "both"));
+        else if (edit === "easeIn") void commit(easeOps(editComp, selectedKeys, "in"));
+        else if (edit === "easeOut") void commit(easeOps(editComp, selectedKeys, "out"));
+        else if (edit === "prevKey" || edit === "nextKey") {
+          const f = adjacentKeyFrame(editComp, selected, frame, edit === "prevKey" ? -1 : 1);
+          if (f != null) void previewApi.seek(f);
+        }
         else if (edit === "remove" && selectedKeys.length > 0) {
           // キーが選ばれていれば、レイヤーより先にキーを消す（MV-0014 決定2）
           void commit(removeKeysOps(editComp, selectedKeys));

@@ -25,7 +25,13 @@ export type EditKey =
   | "redo"
   | "precompose"
   | "timeRemap"
-  | "reveal";
+  | "reveal"
+  | "hold"
+  | "easeBoth"
+  | "easeIn"
+  | "easeOut"
+  | "prevKey"
+  | "nextKey";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -43,6 +49,9 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (ctrl && e.shiftKey && !e.altKey && k === "c") return "precompose";
   // タイムリマップの入り切り＝Ctrl+Alt+T（AE と同じ・MV-0012 決定4）
   if (ctrl && e.altKey && !e.shiftKey && k === "t") return "timeRemap";
+  // キーの補間（MV-0014 決定3・AE と同じ）＝Ctrl+Alt+H 止める・F9 イージーイーズ・Shift+F9 入り・Ctrl+Shift+F9 出
+  if (ctrl && e.altKey && !e.shiftKey && k === "h") return "hold";
+  if (k === "F9" && !e.altKey) return ctrl ? (e.shiftKey ? "easeOut" : null) : e.shiftKey ? "easeIn" : "easeBoth";
   if (ctrl && !e.shiftKey && k === "a") return "selectAll";
   if (ctrl && k === "]") return "forward";
   if (ctrl && k === "[") return "backward";
@@ -56,12 +65,29 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (k === "s" && !e.shiftKey) return "snap";
   // キーフレームのある値だけを開く＝U（AE と同じ・MV-0014 決定1）
   if (k === "u" && !e.shiftKey) return "reveal";
+  // 前／次のキーへ＝J／K（AE と同じ・MV-0014 決定4）
+  if (k === "j" && !e.shiftKey) return "prevKey";
+  if (k === "k" && !e.shiftKey) return "nextKey";
   return null;
 }
 
 /** 編集のキー → 取引の中身（選んでいるレイヤー・今の時刻）。 */
 export function editOps(
-  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose" | "timeRemap" | "reveal">,
+  key: Exclude<EditKey, 
+    | "selectAll"
+    | "snap"
+    | "undo"
+    | "redo"
+    | "precompose"
+    | "timeRemap"
+    | "reveal"
+    | "hold"
+    | "easeBoth"
+    | "easeIn"
+    | "easeOut"
+    | "prevKey"
+    | "nextKey"
+  >,
   comp: Composition,
   selected: ReadonlySet<string>,
   playhead: number,
