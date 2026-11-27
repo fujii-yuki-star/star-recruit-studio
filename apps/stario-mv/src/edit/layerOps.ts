@@ -148,6 +148,29 @@ export function renameOp(l: Layer, name: string): Op | null {
   return n === "" || n === l.name ? null : { op: "updateLayer", layerId: l.id, patch: { name: n } };
 }
 
+/**
+ * 親を付ける・外す（MV-0010 決定5）＝見た目を保つ（Rust の `setParent`・今の時刻で）。
+ * 同じ親なら何もしない。
+ */
+export function setParentOp(l: Layer, parentId: string | null, playhead: number): Op | null {
+  if ((l.parentId ?? null) === parentId) return null;
+  return { op: "setParent", layerId: l.id, parentId, frame: playhead };
+}
+
+/** 親にできるレイヤー（自分と、自分の子孫は輪になるので除く）。並びの順。 */
+export function parentCandidates(comp: Composition, id: string): Layer[] {
+  const parentOf = new Map(comp.layers.map((l) => [l.id, l.parentId ?? null]));
+  const descends = (x: string): boolean => {
+    let cur: string | null = x;
+    for (let i = 0; i <= comp.layers.length && cur; i += 1) {
+      if (cur === id) return true;
+      cur = parentOf.get(cur) ?? null;
+    }
+    return false;
+  };
+  return comp.layers.filter((l) => !descends(l.id));
+}
+
 /** 範囲の選択（`Shift`＝基点からの間を全部）。並びの順で返す。 */
 export function rangeSelect(comp: Composition, anchor: string, to: string): string[] {
   const ids = comp.layers.map((l) => l.id);

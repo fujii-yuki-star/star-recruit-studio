@@ -27,6 +27,8 @@ export interface Layer {
   outFrame: number;
   /** 素材の時刻 0 を置くフレーム。 */
   startFrame: number;
+  /** 親（同じコンポジションのレイヤー・MV-0010 決定5）。 */
+  parentId?: string | null;
   blendMode?: BlendMode;
   transform?: Partial<Record<TransformKey, Animatable>>;
   text?: { text: string; fontFamily: string; fontSize: number; fill: Color } & Record<string, unknown>;
@@ -138,7 +140,8 @@ export type Op =
   | { op: "updateLayer"; layerId: string; patch: Record<string, unknown> }
   | { op: "removeLayer"; layerId: string }
   | { op: "moveLayer"; layerId: string; index: number }
-  | { op: "splitLayer"; layerId: string; frame: number };
+  | { op: "splitLayer"; layerId: string; frame: number }
+  | { op: "setParent"; layerId: string; parentId: string | null; frame: number };
 
 /** レイヤーを直す編集（値の欄の操作は全部これ）。 */
 export type UpdateOp = Extract<Op, { op: "updateLayer" }>;

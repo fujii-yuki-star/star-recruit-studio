@@ -586,3 +586,18 @@ input:focus-visible {
   z-index: 1;
   pointer-events: none;
 }
+/* 親の列（MV-0010 決定5） */
+.tl-parent {
+  height: 20px;
+  max-width: 72px;
+  padding: 0 2px;
+  font-size: 11px;
+  flex: none;
+}
+/* ヌルは描かれない＝帯は線だけ */
+.tl-bar.type-null {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--muted);
+}
+

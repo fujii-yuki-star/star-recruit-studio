@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dragDelta, insideQuad, movePositionOp, pickLayerAt, toPanel, type Bounds, type Point } from "./overlay";
+import { dragDelta, insideQuad, movePositionOp, pickLayerAt, toPanel, toParentDelta, type Bounds, type Point } from "./overlay";
 import { assetSummary } from "./AssetsPanel";
 import type { Layer } from "./types";
 
@@ -88,6 +88,18 @@ describe("掴んで動かす量（MV-0008 決定6）", () => {
         },
       },
     });
+  });
+});
+
+describe("親のある子を掴む（MV-0010 決定5）", () => {
+  it("コンポジションの差を、親の向きと大きさの逆で親の座標の差にする", () => {
+    expect(toParentDelta([10, 4], undefined)).toEqual([10, 4]);
+    expect(toParentDelta([10, 4], [2, 0, 0, 2])).toEqual([5, 2]);
+    // 親が 90°（x→y）＝画面の右は、親の座標では上（-y）
+    const r = toParentDelta([10, 0], [0, 1, -1, 0]);
+    expect(r[0]).toBeCloseTo(0);
+    expect(r[1]).toBeCloseTo(-10);
+    expect(toParentDelta([10, 4], [0, 0, 0, 0])).toEqual([0, 0]);
   });
 });
 
