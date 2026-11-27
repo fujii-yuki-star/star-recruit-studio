@@ -37,6 +37,10 @@ pub enum Cmd {
     Composition(String),
     /// 音を消す（true）／鳴らす（false）。
     Mute(bool),
+    /// 掴んで動かしている途中の編集（MV-0008 決定1）＝写しに当てて描くだけ・保存しない。`None`＝試しをやめる。
+    Trial(Option<Vec<serde_json::Value>>),
+    /// 画面の取引を保存した＝すぐ読み直す（外の変更を見る間隔を待たない）。試しもやめる。
+    Reload,
 }
 
 /// 画面へ知らせる今の状態。
@@ -59,6 +63,24 @@ struct Open {
     project: Project,
     comp_id: String,
     modified: Option<SystemTime>,
+    /// 試しの編集と、それを写しに当てた動画（描くのはこちら＝[`Open::shown`]）。
+    trial_ops: Option<Vec<serde_json::Value>>,
+    trial: Option<Project>,
+}
+
+impl Open {
+    /// 描く動画（試しがあれば試しを当てた写し）。
+    fn shown(&self) -> &Project {
+        self.trial.as_ref().unwrap_or(&self.project)
+    }
+
+    /// 試しを今の中身に当て直す（外の変更で中身が変わったときも、掴んでいる途中の見え方を保つ）。
+    fn retrial(&mut self) {
+        self.trial = self
+            .trial_ops
+            .as_deref()
+            .and_then(|ops| crate::edit::trial_project(&self.project, ops));
+    }
 }
 
 /// 糸を起こす（窓に描く準備に失敗したら、理由を画面へ知らせて終わる）。
@@ -173,6 +195,7 @@ fn run(
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
         let mut want_play = false;
+        let mut force_reload = false;
         for cmd in first.into_iter().chain(rx.try_iter()) {
             let duration = comp_info.map(|c| c.1).unwrap_or(1);
             match cmd {
@@ -183,6 +206,8 @@ fn run(
                         dir,
                         project: *project,
                         comp_id,
+                        trial_ops: None,
+                        trial: None,
                     });
                     frame = 0;
                     playing = false;
@@ -210,6 +235,19 @@ fn run(
                 Cmd::Step(d) => {
                     playing = false;
                     frame = (frame + d).clamp(0, duration - 1);
+                }
+                Cmd::Trial(ops) => {
+                    if let Some(o) = open.as_mut() {
+                        o.trial_ops = ops;
+                        o.retrial();
+                    }
+                }
+                Cmd::Reload => {
+                    if let Some(o) = open.as_mut() {
+                        o.trial_ops = None;
+                        o.trial = None;
+                    }
+                    force_reload = true;
                 }
                 Cmd::Composition(id) => {
                     if let Some(o) = open.as_mut() {
@@ -279,11 +317,12 @@ fn run(
         }
 
         // 外の変更を映す（C-3 の読む側）
-        if last_watch.elapsed() >= WATCH_INTERVAL {
+        if force_reload || last_watch.elapsed() >= WATCH_INTERVAL {
             last_watch = Instant::now();
             if let Some(o) = open.as_mut() {
                 let m = modified(&o.dir);
-                if m != o.modified {
+                // ⚠️ 画面の保存は同じ秒の中で続くことがある＝更新時刻だけで見ると読み直しを取りこぼす
+                if force_reload || m != o.modified {
                     o.modified = m;
                     match mv_core::io::load_project(&o.dir) {
                         Ok(l) => {
@@ -293,6 +332,7 @@ fn run(
                             }
                             let _ = window.emit("project-changed", crate::summary(&o.dir, &l));
                             o.project = l.project;
+                            o.retrial();
                             version += 1;
                             dirty = true;
                         }
@@ -359,7 +399,7 @@ fn run(
         }
         dirty = false;
         let image = match &open {
-            Some(o) => match renderer.render_texture(&o.project, &o.comp_id, frame, &o.dir) {
+            Some(o) => match renderer.render_texture(o.shown(), &o.comp_id, frame, &o.dir) {
                 Ok(t) => {
                     let _ = window.emit("preview-error", None::<String>);
                     Some(t)

@@ -38,7 +38,7 @@ ADR-0074 決定3 で、外部 AI（Claude・Codex など）が γ を操作す�
 | `exportVideo` | MP4 に書き出す（MV-0004） | 出力だけ |
 
 - 取引の中の編集（`applyTransaction` の `ops`）：
-  - レイヤー：`addLayer`／`updateLayer`／`removeLayer`／`moveLayer`
+  - レイヤー：`addLayer`／`updateLayer`／`removeLayer`／`moveLayer`／`splitLayer`（今のフレームで2つに分ける＝MV-0008 で追加）
   - コンポジション：`addComposition`／`updateComposition`／`removeComposition`
   - 動画全体：`updateProject`
   - 素材：`importAsset`／`removeAsset`（段階⑥で足した＝MV-0006 決定1）。

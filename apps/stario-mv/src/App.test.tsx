@@ -21,6 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "initial_project") return "C:/v";
     if (cmd === "open_project") return summary;
     if (cmd === "pick_project_folder") return null;
+    if (cmd === "edit_read") return { revision: "r1", project: { ...summary, assets: [], compositions: summary.compositions.map((c) => ({ ...c, layers: [], markers: [] })) } };
     return undefined;
   }),
 }));

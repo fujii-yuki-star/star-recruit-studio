@@ -20,9 +20,11 @@ body,
   height: 100%;
   background: transparent;
 }
+/* 行：帯（上）・上段（素材｜プレビュー｜値）・境目・タイムライン・帯（再生）＝MV-0008 決定3。
+   段の大きさは画面が style で渡す（境目を掴んで変える・手元に覚える）。 */
 .app {
   display: grid;
-  grid-template-rows: 40px 1fr 48px;
+  grid-template-rows: 40px 1fr 5px 260px 48px;
   height: 100%;
 }
 .bar {
@@ -103,13 +105,275 @@ input:focus-visible {
   white-space: nowrap;
 }
 .stage {
-  display: flex;
+  display: grid;
+  grid-template-columns: 220px 5px 1fr 5px 280px;
   min-height: 0;
 }
 .preview {
-  flex: 1;
   position: relative;
+  min-width: 0;
   background: transparent;
+}
+.pane {
+  background: var(--panel);
+  overflow: auto;
+  padding: 6px 10px;
+  min-width: 0;
+}
+.pane h2 {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 6px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.muted {
+  color: var(--muted);
+}
+.assets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.assets li {
+  padding: 3px 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assets .kind {
+  color: var(--muted);
+  font-size: 11px;
+}
+.props {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+.props dt {
+  color: var(--muted);
+}
+.props dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+/* 境目（掴んで大きさを変える） */
+.splitter {
+  background: var(--line);
+}
+.splitter.v {
+  cursor: col-resize;
+}
+.splitter.h {
+  cursor: row-resize;
+}
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+/* タイムライン（MV-0008 決定3・4） */
+.tl-pane {
+  display: grid;
+  grid-template-rows: 32px 1fr;
+  min-height: 0;
+  background: var(--panel);
+}
+.tl-tools {
+  border-bottom-width: 1px;
+}
+.tl-tools button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tl-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.tl-msg.warn {
+  color: var(--warn);
+}
+.tl-empty {
+  padding: 8px 12px;
+}
+.timeline {
+  position: relative;
+  overflow: auto;
+  min-height: 0;
+  user-select: none;
+}
+.tl-inner {
+  position: relative;
+}
+.tl-ruler-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  background: #191b20;
+  border-bottom: 1px solid var(--line);
+}
+.tl-corner {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  color: var(--muted);
+  background: #191b20;
+  border-right: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.tl-ruler {
+  position: relative;
+  flex: 1;
+  cursor: ew-resize;
+}
+.tl-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding-left: 3px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tl-marker {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-bottom-color: var(--warn);
+}
+.tl-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  border-bottom: 1px solid #23262c;
+}
+.tl-row.selected .tl-name,
+.tl-row.selected .tl-track {
+  background: #232a38;
+}
+.tl-row.drop {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.tl-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  box-sizing: border-box;
+  cursor: grab;
+}
+.tl-toggle {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 3px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.tl-toggle[aria-pressed="true"] {
+  color: var(--text);
+}
+.tl-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.tl-rename {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  background: #272a31;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+}
+.tl-track {
+  position: relative;
+  flex: 1;
+}
+.tl-bar {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 3px;
+  background: #3b5f9e;
+  border: 1px solid #5d84c9;
+  box-sizing: border-box;
+  cursor: grab;
+}
+/* 端（掴むと切る）＝左右 6 画素（Timeline.tsx の EDGE_PX） */
+.tl-bar::before,
+.tl-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.tl-bar::before {
+  left: 0;
+}
+.tl-bar::after {
+  right: 0;
+}
+.tl-bar.type-video,
+.tl-bar.type-image {
+  background: #3d6e5a;
+  border-color: #5c9c80;
+}
+.tl-bar.type-text,
+.tl-bar.type-shape {
+  background: #7a5b2e;
+  border-color: #b08540;
+}
+.tl-bar.type-audio {
+  background: #5b3f7a;
+  border-color: #8a63b4;
+}
+.tl-row.selected .tl-bar {
+  outline: 1px solid #fff;
+}
+.tl-bar.off {
+  opacity: 0.35;
+}
+.tl-bar.locked {
+  cursor: not-allowed;
+  background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.25) 4px 8px);
+}
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #ff5a5a;
+  z-index: 1;
+  pointer-events: none;
 }
 .hint,
 .notice {
@@ -131,11 +395,8 @@ input:focus-visible {
   border: 1px solid var(--warn);
 }
 .issues {
-  width: 320px;
-  overflow: auto;
-  background: var(--panel);
-  border-left: 1px solid var(--line);
-  padding: 8px 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
 }
 .issues h2 {
   font-size: 13px;

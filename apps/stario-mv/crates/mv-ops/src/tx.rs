@@ -20,6 +20,7 @@ pub const TX_OPS: &[&str] = &[
     "updateLayer",
     "removeLayer",
     "moveLayer",
+    "splitLayer",
     "addComposition",
     "updateComposition",
     "removeComposition",
@@ -111,6 +112,42 @@ pub fn apply_ops(doc: &mut Value, ops: &[Value]) -> Result<Vec<Created>, OpFailu
                     .unwrap_or(0)
                     .min(layers.len());
                 layers.insert(at, l);
+            }
+            "splitLayer" => {
+                // AE の「レイヤーを分割」（MV-0008 決定4）＝元は frame で終わり、写しが frame から始まって元の1つ上に置かれる
+                let id = str_arg(op, "layerId");
+                let (ci, li) = find_layer(doc, id).ok_or_else(|| fail(layer_missing(id)))?;
+                let at = op.get("frame").and_then(Value::as_i64).unwrap_or(-1);
+                let orig = &doc["compositions"][ci]["layers"][li];
+                let (inf, outf) = (
+                    orig["inFrame"].as_i64().unwrap_or(0),
+                    orig["outFrame"].as_i64().unwrap_or(0),
+                );
+                if !(inf < at && at < outf) {
+                    return Err(fail(format!(
+                        "フレーム {at} はレイヤー {id} の見えている範囲（inFrame {inf}〜outFrame {outf}）の内側ではありません。分けるフレームは inFrame より後・outFrame より前にしてください。"
+                    )));
+                }
+                let new_layer_id = match op.get("id").and_then(Value::as_str) {
+                    Some(given) if mv_core::id::is_valid_id(IdKind::Layer, given) => given.to_string(),
+                    Some(given) => {
+                        return Err(fail(format!(
+                            "id「{given}」はレイヤーの ID の形ではありません。newIds（kind: layer）で発行した ID を渡すか、id を省いてください。"
+                        )))
+                    }
+                    None => new_id(IdKind::Layer),
+                };
+                let mut copy = orig.clone();
+                copy["id"] = json!(new_layer_id);
+                copy["inFrame"] = json!(at);
+                doc["compositions"][ci]["layers"][li]["outFrame"] = json!(at);
+                // 0＝最前面＝元の位置に入れると、元は1つ下（奥）へずれる＝写しが元の上
+                comp_layers_mut(doc, ci).insert(li, copy);
+                created.push(Created {
+                    index,
+                    kind: "layer",
+                    id: new_layer_id,
+                });
             }
             "addComposition" => {
                 let Some(Value::Object(src)) = op.get("composition") else {
@@ -454,6 +491,95 @@ fn comp_layers_mut(doc: &mut Value, ci: usize) -> &mut Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn two_layers() -> Value {
+        json!({"compositions": [{"id": "cmp_A", "layers": [
+            {"id": "lyr_FRONT", "inFrame": 0, "outFrame": 100, "startFrame": 0},
+            {"id": "lyr_X", "inFrame": 10, "outFrame": 50, "startFrame": 5, "name": "x",
+             "transform": {"opacity": {"keyframes": [{"frame": 12, "value": 0}]}}}
+        ]}]})
+    }
+
+    #[test]
+    fn splitlayer_は元を今の時刻で終え_写しを元の上に置く() {
+        let mut d = two_layers();
+        let c = apply_ops(
+            &mut d,
+            &[json!({"op": "splitLayer", "layerId": "lyr_X", "frame": 30})],
+        )
+        .unwrap();
+        let ls = d["compositions"][0]["layers"].as_array().unwrap();
+        assert_eq!(ls.len(), 3);
+        assert_eq!(ls[0]["id"], "lyr_FRONT", "ほかのレイヤーの並びは変えない");
+        let copy = &ls[1];
+        let orig = &ls[2];
+        assert_eq!(orig["id"], "lyr_X");
+        assert_eq!(
+            (orig["inFrame"].as_i64(), orig["outFrame"].as_i64()),
+            (Some(10), Some(30))
+        );
+        assert_eq!(
+            (copy["inFrame"].as_i64(), copy["outFrame"].as_i64()),
+            (Some(30), Some(50))
+        );
+        assert_eq!(
+            copy["startFrame"], 5,
+            "素材の時刻はずらさない＝絵は切れ目でつながる"
+        );
+        assert_eq!(copy["transform"], orig["transform"], "キーフレームも同じ");
+        assert_eq!(copy["name"], "x");
+        assert_ne!(copy["id"], orig["id"]);
+        assert!(mv_core::id::is_valid_id(
+            IdKind::Layer,
+            copy["id"].as_str().unwrap()
+        ));
+        assert_eq!(
+            c,
+            vec![Created {
+                index: 0,
+                kind: "layer",
+                id: copy["id"].as_str().unwrap().into()
+            }]
+        );
+    }
+
+    #[test]
+    fn splitlayer_は範囲の外と端では断り_渡した_id_を使う() {
+        for at in [10, 50, 9, 51] {
+            let mut d = two_layers();
+            let e = apply_ops(
+                &mut d,
+                &[json!({"op": "splitLayer", "layerId": "lyr_X", "frame": at})],
+            )
+            .unwrap_err();
+            assert!(
+                e.message.contains("内側ではありません"),
+                "{at}: {}",
+                e.message
+            );
+        }
+        let mut d = two_layers();
+        let given = new_id(IdKind::Layer);
+        apply_ops(
+            &mut d,
+            &[json!({"op": "splitLayer", "layerId": "lyr_X", "frame": 11, "id": given})],
+        )
+        .unwrap();
+        assert_eq!(d["compositions"][0]["layers"][1]["id"], json!(given));
+        let mut d = two_layers();
+        let e = apply_ops(
+            &mut d,
+            &[json!({"op": "splitLayer", "layerId": "lyr_X", "frame": 11, "id": "bad"})],
+        )
+        .unwrap_err();
+        assert!(e.message.contains("ID の形ではありません"));
+        let e = apply_ops(
+            &mut d,
+            &[json!({"op": "splitLayer", "layerId": "lyr_NONE", "frame": 11})],
+        )
+        .unwrap_err();
+        assert!(e.message.contains("見つかりません"));
+    }
 
     #[test]
     fn merge_patch_は_rfc7386_どおり() {
