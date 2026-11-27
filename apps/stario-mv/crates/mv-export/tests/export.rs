@@ -595,8 +595,14 @@ fn 入れ子のタイムリマップは中の音にも効く() {
     let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 48000)
         .unwrap()
         .unwrap();
-    let hz = pitch(&pcm, 48000.0, 0.2, 1.8);
-    assert!((hz - 500.0).abs() < 10.0, "中の音も半分の高さ: {hz}");
+    // ⚠️ 区間を2つに分けて見る＝リマップしないと前半は無音・後半は 1000 Hz で、通して数えると平均がたまたま 500 Hz になる（変異チェックで生き残った）
+    for (from, to) in [(0.2, 0.9), (1.1, 1.8)] {
+        let hz = pitch(&pcm, 48000.0, from, to);
+        assert!(
+            (hz - 500.0).abs() < 10.0,
+            "中の音も半分の高さ（{from}〜{to} 秒）: {hz}"
+        );
+    }
     // 中の音が終わったあと（中の 2 秒より後＝外の 2 秒より後）は無音
     assert!(pitch(&pcm, 48000.0, 2.2, 2.9) < 1.0);
     std::fs::remove_dir_all(&dir).ok();

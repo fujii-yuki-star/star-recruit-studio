@@ -1284,11 +1284,14 @@ fn タイムリマップの入り切り() {
             "入れても同じ {f}"
         );
     }
-    // 既にあれば変えない
+    // 既にあれば変えない（⚠️ 始めと終わりの2つでないものにする＝2つだと置き換えても同じ値になり、見分けられない＝変異チェックで生き残った）
     tx(
         &mut ops,
         &dir,
-        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 50 }]}),
+        json!({ "ops": [{ "op": "updateLayer", "layerId": pre, "patch": { "timeRemap": { "keyframes": [
+            { "frame": 20, "value": 1.0, "interpolation": "linear" },
+            { "frame": 40, "value": 1.0, "interpolation": "linear" },
+            { "frame": 60, "value": 0.5, "interpolation": "linear" }] } } }]}),
     );
     let (doc, _) = read_doc(&dir).unwrap();
     let kept = doc["compositions"][0]["layers"][0]["timeRemap"].clone();
