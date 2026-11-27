@@ -612,3 +612,86 @@ fn 親の変形を子に掛け_ヌルは描かず枠だけ返す() {
         f.pixel(190, 95)
     );
 }
+
+/// 入れ子（MV-0011）：中を透明な地で描いて重ねる・中の時刻・範囲の外は描かない・作業の色空間のまま（直接描いたのと同じ色）。
+#[test]
+fn 入れ子は中を透明な地で描き中の時刻で重ねる() {
+    for space in [WorkingColorSpace::Linear, WorkingColorSpace::Srgb] {
+        let mut p = blank(space);
+        // 中：40×20・背景は緑（外では塗らない）・10 フレーム目から半透明の赤
+        let mut inner = p.compositions[0].clone();
+        inner.id = new_id(IdKind::Composition);
+        inner.width = 40;
+        inner.height = 20;
+        inner.duration_frames = 20;
+        inner.background = [0.0, 1.0, 0.0, 1.0];
+        let mut red = solid([1.0, 0.0, 0.0, 1.0], 40, 20);
+        red.in_frame = 10;
+        red.out_frame = 20;
+        red.transform.opacity = Animatable::number(0.5);
+        inner.layers = vec![red];
+        // 外：入れ子を (100, 50) に・中の 0 秒を外の 5 フレーム目に
+        let mut pre = base_layer(LayerType::Precomp);
+        pre.composition_id = Some(inner.id.clone());
+        pre.transform.position = Animatable::vector(&[100.0, 50.0]);
+        pre.start_frame = 5;
+        p.compositions[0].layers = vec![pre];
+        p.compositions.push(inner.clone());
+        // 外の 14 フレーム＝中の 9＝赤はまだ＝何も無い（中の背景の緑も出ない）
+        let f = render(&p, 14).unwrap();
+        assert!(
+            near(f.pixel(110, 60), [0, 0, 0, 255], 1),
+            "{space:?} {:?}",
+            f.pixel(110, 60)
+        );
+        // 外の 15 フレーム＝中の 10＝赤が出る。直接（入れ子でなく）描いたのと同じ色
+        let f = render(&p, 15).unwrap();
+        let mut direct = blank(space);
+        let mut r = inner.layers[0].clone();
+        r.in_frame = 0;
+        r.transform.position = Animatable::vector(&[100.0, 50.0]);
+        direct.compositions[0].layers = vec![r];
+        let g = render(&direct, 15).unwrap();
+        assert!(
+            near(f.pixel(110, 60), g.pixel(110, 60), 1),
+            "{space:?} 入れ子 {:?} 直接 {:?}",
+            f.pixel(110, 60),
+            g.pixel(110, 60)
+        );
+        assert!(f.pixel(110, 60)[0] > 100, "赤が出る {:?}", f.pixel(110, 60));
+        assert!(
+            near(f.pixel(150, 60), [0, 0, 0, 255], 1),
+            "入れ子の外は背景"
+        );
+        // 中の長さの外（外の 25 フレーム＝中の 20）は描かない
+        let f = render(&p, 25).unwrap();
+        assert!(near(f.pixel(110, 60), [0, 0, 0, 255], 1));
+        // 枠＝中のコンポジションの大きさ
+        let id = p.main_composition_id.clone();
+        let q = renderer().layer_quads(&p, &id, 15, Path::new(".")).unwrap();
+        assert_eq!(q[0].corners[0], [100.0, 50.0]);
+        assert_eq!(q[0].corners[2], [140.0, 70.0]);
+    }
+}
+
+#[test]
+fn 入れ子の時刻は秒で中の_fps_へ切り捨て() {
+    let mut outer = blank(WorkingColorSpace::Srgb).compositions[0].clone();
+    outer.fps = Rational { num: 30, den: 1 };
+    let mut inner = outer.clone();
+    inner.fps = Rational { num: 24, den: 1 };
+    inner.duration_frames = 48;
+    let mut l = base_layer(LayerType::Precomp);
+    l.start_frame = 10;
+    // 外 10 → 0 秒 → 中 0 ／ 外 25 → 0.5 秒 → 中 12 ／ 外 9 → 前 ／ 外 70 → 2 秒 → 中 48＝外
+    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 10), Some(0));
+    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 25), Some(12));
+    assert_eq!(
+        mv_render::nested_frame(&outer, &inner, &l, 11),
+        Some(0),
+        "1/30 秒は中の 0.8 コマ＝切り捨て"
+    );
+    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 9), None);
+    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 69), Some(47));
+    assert_eq!(mv_render::nested_frame(&outer, &inner, &l, 70), None);
+}

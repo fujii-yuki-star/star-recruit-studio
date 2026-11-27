@@ -37,7 +37,6 @@ pub struct Issue {
 
 /// まだ使えない機能と、使えるようになる版（ADR-0074 決定6 の表から）。⚠️ **1か所に置く**。
 const NOT_YET: &[(&str, &str)] = &[
-    ("入れ子のコンポジション", "γ0.2"),
     ("タイムリマップ", "γ0.2"),
     ("2.5D（奥行き・カメラ）", "γ0.2"),
     ("つなぎ", "γ0.3"),
@@ -274,11 +273,6 @@ impl Checker {
                 IssueCode::NotYetSupported,
                 format!("{lpath}/type"),
                 not_yet("調整レイヤー"),
-            ),
-            LayerType::Precomp => self.push(
-                IssueCode::NotYetSupported,
-                format!("{lpath}/type"),
-                not_yet("入れ子のコンポジション"),
             ),
             _ => {}
         }

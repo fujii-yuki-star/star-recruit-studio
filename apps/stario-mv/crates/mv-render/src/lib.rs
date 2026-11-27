@@ -144,7 +144,8 @@ struct LayerUniform {
     opacity: f32,
     mode: u32,
     linear: u32,
-    pad: u32,
+    /// 1＝中身が既に作業の色空間・乗算済み（入れ子）＝読むときに直さない。
+    src_working: u32,
 }
 
 const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -303,6 +304,23 @@ impl Renderer {
             .find(|c| c.id == composition_id)
             .ok_or_else(|| RenderError::CompositionNotFound(composition_id.into()))?;
         let linear = project.settings.working_color_space == WorkingColorSpace::Linear;
+        let accum = self.render_accum(project, comp, frame, project_dir, linear, true, 0)?;
+        self.finish(&accum, comp.width, comp.height, linear)
+    }
+
+    /// コンポジションのある時刻を、作業の色空間・乗算済みの絵として描く（仕上げの前）。
+    /// `with_background`＝背景の色で塗る（入れ子の中は塗らない＝透明な地・MV-0011 決定1）。`depth`＝入れ子の深さ。
+    #[allow(clippy::too_many_arguments)]
+    fn render_accum(
+        &mut self,
+        project: &Project,
+        comp: &mv_core::model::Composition,
+        frame: i64,
+        project_dir: &Path,
+        linear: bool,
+        with_background: bool,
+        depth: u32,
+    ) -> Result<wgpu::Texture, RenderError> {
         let (w, h) = (comp.width, comp.height);
         let d = &self.gpu.device;
         let accum = |label| {
@@ -326,7 +344,11 @@ impl Renderer {
         let mut b = accum("accum-b");
 
         // 背景（sRGB の値 → 作業の色空間・乗算済み）
-        let bg = comp.background;
+        let bg = if with_background {
+            comp.background
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        };
         let conv = |c: f64| if linear { srgb_to_linear(c) } else { c };
         let clear = wgpu::Color {
             r: conv(bg[0]) * bg[3],
@@ -357,6 +379,16 @@ impl Renderer {
 
         // ⚠️ 先頭が最前面（MV-0001 決定6）＝描くのは末尾から
         for layer in shown_layers(comp, frame).into_iter().rev() {
+            // 入れ子＝中を同じ描画の核で描き、作業の色空間の絵のまま重ねる（MV-0011 決定1）
+            if layer.layer_type == LayerType::Precomp {
+                if let Some((tex, iw, ih, m)) =
+                    self.precomp_content(project, comp, layer, frame, project_dir, linear, depth)?
+                {
+                    self.composite_texture(&tex, iw, ih, m, layer, frame, linear, true, &a, &b)?;
+                    std::mem::swap(&mut a, &mut b);
+                }
+                continue;
+            }
             let Some((content, m)) =
                 self.layer_content(project, comp, layer, frame, project_dir)?
             else {
@@ -365,7 +397,47 @@ impl Renderer {
             self.composite_layer(&content, m, layer, frame, linear, &a, &b)?;
             std::mem::swap(&mut a, &mut b);
         }
-        self.finish(&a, w, h, linear)
+        Ok(a)
+    }
+
+    /// 入れ子のレイヤーの中身（作業の色空間の絵・大きさ・中身の画素 → コンポジションの画素）。描くものが無ければ None。
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    fn precomp_content(
+        &mut self,
+        project: &Project,
+        comp: &mv_core::model::Composition,
+        layer: &mv_core::model::Layer,
+        frame: i64,
+        project_dir: &Path,
+        linear: bool,
+        depth: u32,
+    ) -> Result<Option<(wgpu::Texture, u32, u32, Affine)>, RenderError> {
+        let f = frame as f64;
+        let t = transform_at(&layer.transform, f).map_err(RenderError::eval)?;
+        if t.opacity <= 0.0 {
+            return Ok(None);
+        }
+        let inner = nested_comp(project, layer)?;
+        let Some(inner_frame) = nested_frame(comp, inner, layer, frame) else {
+            return Ok(None);
+        };
+        if depth + 1 > MAX_NEST_DEPTH {
+            return Err(RenderError::Eval(format!(
+                "「{}」の入れ子が深すぎます（{MAX_NEST_DEPTH} 段まで）。入れ子を減らしてください。",
+                layer.name
+            )));
+        }
+        let tex = self.render_accum(
+            project,
+            inner,
+            inner_frame,
+            project_dir,
+            linear,
+            false,
+            depth + 1,
+        )?;
+        let world = mv_core::eval::world_matrix(comp, layer, f).map_err(RenderError::eval)?;
+        Ok(Some((tex, inner.width, inner.height, world)))
     }
 
     /// 見えているレイヤーの枠＝中身の四隅をコンポジションの画素で（MV-0008 決定6）。並びは先頭が最前面。
@@ -392,6 +464,17 @@ impl Renderer {
                 out.push(LayerQuad {
                     layer_id: layer.id.clone(),
                     corners: quad_of(m, NULL_SIZE, NULL_SIZE),
+                    parent_linear: parent_linear(comp, layer, frame)?,
+                });
+                continue;
+            }
+            if layer.layer_type == LayerType::Precomp {
+                let inner = nested_comp(project, layer)?;
+                let m = mv_core::eval::world_matrix(comp, layer, frame as f64)
+                    .map_err(RenderError::eval)?;
+                out.push(LayerQuad {
+                    layer_id: layer.id.clone(),
+                    corners: quad_of(m, inner.width, inner.height),
                     parent_linear: parent_linear(comp, layer, frame)?,
                 });
                 continue;
@@ -635,6 +718,35 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.composite_texture(
+            &tex,
+            content.width,
+            content.height,
+            m,
+            layer,
+            frame,
+            linear,
+            false,
+            back,
+            out,
+        )
+    }
+
+    /// 中身の絵（GPU）を、変換 `m` で重ねる。`src_working`＝中身が既に作業の色空間・乗算済み（入れ子＝MV-0011 決定1）。
+    #[allow(clippy::too_many_arguments)]
+    fn composite_texture(
+        &self,
+        tex: &wgpu::Texture,
+        cw: u32,
+        ch: u32,
+        m: Affine,
+        layer: &mv_core::model::Layer,
+        frame: i64,
+        linear: bool,
+        src_working: bool,
+        back: &wgpu::Texture,
+        out: &wgpu::Texture,
+    ) -> Result<(), RenderError> {
         // コンポジションの画素 → 中身の画素
         let inv = invert(m).ok_or_else(|| {
             RenderError::Eval(format!(
@@ -647,18 +759,13 @@ impl Renderer {
             .opacity;
         let u = LayerUniform {
             m0: [inv[0] as f32, inv[1] as f32, inv[2] as f32, inv[3] as f32],
-            m1: [
-                inv[4] as f32,
-                inv[5] as f32,
-                content.width as f32,
-                content.height as f32,
-            ],
+            m1: [inv[4] as f32, inv[5] as f32, cw as f32, ch as f32],
             opacity: opacity as f32,
             mode: blend_id(layer.blend_mode),
             linear: linear as u32,
-            pad: 0,
+            src_working: src_working as u32,
         };
-        self.pass(&self.layer_pipeline, &u, &tex, back, out);
+        self.pass(&self.layer_pipeline, &u, tex, back, out);
         Ok(())
     }
 
@@ -775,7 +882,7 @@ impl Renderer {
             opacity: 1.0,
             mode: 0,
             linear: linear as u32,
-            pad: 0,
+            src_working: 0,
         };
         self.pass(&self.final_pipeline, &u, &dummy, accum, &out);
         Ok(out)
@@ -937,6 +1044,37 @@ pub struct LayerQuad {
     pub corners: [[f64; 2]; 4],
     /// 親の変形の向きと大きさ（[a, b, c, d]・親が無ければ単位）。画面で掴んだ量を、位置（親の座標）の差へ戻すのに使う。
     pub parent_linear: [f64; 4],
+}
+
+/// 入れ子の深さの上限（MV-0011 決定1）。
+pub const MAX_NEST_DEPTH: u32 = 16;
+
+/// 入れ子のレイヤーが指すコンポジション。
+fn nested_comp<'a>(
+    project: &'a Project,
+    layer: &mv_core::model::Layer,
+) -> Result<&'a mv_core::model::Composition, RenderError> {
+    let id = layer.composition_id.as_deref().unwrap_or_default();
+    project
+        .compositions
+        .iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| RenderError::CompositionNotFound(id.into()))
+}
+
+/// 外のフレーム → 入れ子の中のフレーム（MV-0011 決定2＝秒にして中の fps で切り捨て）。中の長さの外なら None。
+pub fn nested_frame(
+    outer: &mv_core::model::Composition,
+    inner: &mv_core::model::Composition,
+    layer: &mv_core::model::Layer,
+    frame: i64,
+) -> Option<i64> {
+    let sec =
+        (frame - layer.start_frame) as f64 * f64::from(outer.fps.den) / f64::from(outer.fps.num);
+    let f = (sec * f64::from(inner.fps.num) / f64::from(inner.fps.den) + 1e-6).floor() as i64;
+    (0..i64::from(inner.duration_frames))
+        .contains(&f)
+        .then_some(f)
 }
 
 /// ヌルの枠の大きさ（レイヤーの座標・AE のヌルと同じ 100×100）。

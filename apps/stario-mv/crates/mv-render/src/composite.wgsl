@@ -10,7 +10,8 @@ struct LayerU {
   opacity: f32,
   mode: u32,
   linear: u32,
-  pad: u32,
+  // 1＝中身が既に作業の色空間・乗算済み（入れ子）＝読むときに直さない
+  src_working: u32,
 };
 
 @group(0) @binding(0) var<uniform> u: LayerU;
@@ -114,7 +115,7 @@ fn fs_layer(i: VOut) -> @location(0) vec4<f32> {
   var as_ = src.a * u.opacity;
   var cs = vec3(0.0);
   if (src.a > 0.0) { cs = src.rgb / src.a; }
-  if (u.linear == 1u) { cs = srgb_to_linear(cs); }
+  if (u.linear == 1u && u.src_working == 0u) { cs = srgb_to_linear(cs); }
   let ab = back.a;
   var cb = vec3(0.0);
   if (ab > 0.0) { cb = back.rgb / ab; }

@@ -451,3 +451,53 @@ fn プレビューの音は書き出しと同じ時刻と大きさ() {
         .is_none());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// MV-0011 決定4：入れ子の中の音も、外の時刻へずらし、入れ子のレイヤーの見える範囲で切って混ぜる。消音・表示を切った入れ子は鳴らさない。
+#[test]
+fn 入れ子の中の音も外の時刻で混ぜる() {
+    let dir = tmpdir();
+    let mut p = audio_project(&dir);
+    // 音のレイヤー（中の 30〜60 フレーム＝1〜2 秒）を入れ子へ移す
+    let audio_layer = p.compositions[0].layers.pop().unwrap();
+    let mut inner = p.compositions[0].clone();
+    inner.id = new_id(IdKind::Composition);
+    inner.layers = vec![audio_layer];
+    let mut pre = p.compositions[0].layers[1].clone();
+    pre.id = new_id(IdKind::Layer);
+    pre.layer_type = LayerType::Precomp;
+    pre.solid = None;
+    pre.composition_id = Some(inner.id.clone());
+    // 中の 0 秒＝外の 15 フレーム（0.5 秒）。見える範囲は外の 0〜60 フレーム（2 秒まで）
+    pre.start_frame = 15;
+    pre.in_frame = 0;
+    pre.out_frame = 60;
+    p.compositions[0].layers.push(pre);
+    p.compositions.push(inner);
+    let comp = &p.compositions[0];
+    let fps = f64::from(comp.fps.num) / f64::from(comp.fps.den);
+    let v = mv_export::audio_inputs(&p, comp, &dir, fps, &ffmpeg()).unwrap();
+    assert_eq!(v.len(), 1, "{v:?}");
+    // 中の 1〜2 秒 → 外の 1.5〜2.5 秒 → 見える範囲（2 秒まで）で切る＝1.5〜2.0
+    assert!((v[0].at_sec - 1.5).abs() < 1e-6, "{v:?}");
+    assert!((v[0].duration_sec - 0.5).abs() < 1e-6, "{v:?}");
+    assert!((v[0].volume_db - (-6.0)).abs() < 1e-9);
+    // 入れ子を消音・表示を切ると鳴らさない
+    let mut q = p.clone();
+    q.compositions[0].layers.last_mut().unwrap().audio = Some(LayerAudio {
+        volume_db: Animatable::number(0.0),
+        muted: true,
+    });
+    assert!(
+        mv_export::audio_inputs(&q, &q.compositions[0], &dir, fps, &ffmpeg())
+            .unwrap()
+            .is_empty()
+    );
+    let mut q = p.clone();
+    q.compositions[0].layers.last_mut().unwrap().enabled = false;
+    assert!(
+        mv_export::audio_inputs(&q, &q.compositions[0], &dir, fps, &ffmpeg())
+            .unwrap()
+            .is_empty()
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
