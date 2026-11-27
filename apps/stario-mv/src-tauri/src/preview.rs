@@ -519,6 +519,23 @@ pub fn bounds_json(
     })
 }
 
+/// 再生の経過（秒）。音を鳴らしていれば鳴らした量で、無ければ時計で数える（MV-0007 決定6）。
+fn elapsed(audio_clock: Option<u64>, out: Option<&AudioOut>, play_start: Instant) -> f64 {
+    match (audio_clock, out) {
+        (Some(start), Some(a)) => {
+            a.shared.pos.load(Ordering::Acquire).saturating_sub(start) as f64 / f64::from(a.rate)
+        }
+        _ => play_start.elapsed().as_secs_f64(),
+    }
+}
+
+/// 止まったら音も止める。
+fn stop_audio_unless_playing(playing: bool, out: Option<&AudioOut>) {
+    if let (false, Some(a)) = (playing, out) {
+        a.shared.playing.store(false, Ordering::Release);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,22 +554,5 @@ mod tests {
             v["layers"][0]["corners"],
             serde_json::json!([[100.0, 50.0], [120.0, 50.0], [120.0, 60.0], [100.0, 60.0]])
         );
-    }
-}
-
-/// 再生の経過（秒）。音を鳴らしていれば鳴らした量で、無ければ時計で数える（MV-0007 決定6）。
-fn elapsed(audio_clock: Option<u64>, out: Option<&AudioOut>, play_start: Instant) -> f64 {
-    match (audio_clock, out) {
-        (Some(start), Some(a)) => {
-            a.shared.pos.load(Ordering::Acquire).saturating_sub(start) as f64 / f64::from(a.rate)
-        }
-        _ => play_start.elapsed().as_secs_f64(),
-    }
-}
-
-/// 止まったら音も止める。
-fn stop_audio_unless_playing(playing: bool, out: Option<&AudioOut>) {
-    if let (false, Some(a)) = (playing, out) {
-        a.shared.playing.store(false, Ordering::Release);
     }
 }
