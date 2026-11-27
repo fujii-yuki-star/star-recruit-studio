@@ -88,7 +88,7 @@ export async function prepareBriefingVideo(input: {
   await createBriefingSession(projectId);
   try {
     const kit = await loadBrandKit().catch(() => null);
-    // 会社の見た目のロゴ（登録で「置く」のとき）。⚠️ 見つからなくても締めの場面は作る（ロゴ無し）。
+    // いつもの見た目のロゴ（登録で「置く」のとき）。⚠️ 見つからなくても締めの場面は作る（ロゴ無し）。
     let logo: { libId: string; fileName: string; asset: Asset } | null = null;
     const libId = input.catalog.closing.useBrandLogo ? kit?.logoLibraryAssetId : undefined;
     const lib = libId ? (await listLibraryAssets())?.find((a) => a.id === libId) : undefined;

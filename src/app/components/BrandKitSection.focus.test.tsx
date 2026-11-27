@@ -5,7 +5,7 @@ import { act, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { BrandKitSection } from "./BrandKitSection";
 
-describe("会社の見た目：指定された欄まで寄る（#1032）", () => {
+describe("いつもの見た目：指定された欄まで寄る（#1032）", () => {
   beforeEach(() => {
     useProjectStore.getState().setSettingsFocus(null);
   });

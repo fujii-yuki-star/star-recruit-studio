@@ -200,10 +200,10 @@ describe("AssetLibraryPanel", () => {
   });
 
   /**
-   * ⚠️ **会社の見た目が消した素材を指したままにしない**（#351・PR #888 レビュー 🟡）＝
+   * ⚠️ **いつもの見た目が消した素材を指したままにしない**（#351・PR #888 レビュー 🟡）＝
    * 指し続けると、新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
    */
-  it("会社の見た目のロゴを外すと、そちらの覚えも外して知らせる", async () => {
+  it("いつもの見た目のロゴを外すと、そちらの覚えも外して知らせる", async () => {
     const updateBrandKit = vi.fn(async () => true);
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
     render(<AssetLibraryPanel />);
@@ -212,10 +212,10 @@ describe("AssetLibraryPanel", () => {
     // ⚠️ **確認を通す**（🟡27）＝1クリックでは消えない。確認の中の「外す」を押す。
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     await waitFor(() => expect(updateBrandKit).toHaveBeenCalledWith({ logoLibraryAssetId: undefined }));
-    expect(await screen.findByText(/会社の見た目のロゴも外しました/)).toBeInTheDocument();
+    expect(await screen.findByText(/いつもの見た目のロゴも外しました/)).toBeInTheDocument();
   });
 
-  it("会社の見た目が指していない素材なら、そちらは触らない", async () => {
+  it("いつもの見た目が指していない素材なら、そちらは触らない", async () => {
     const updateBrandKit = vi.fn(async () => {});
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_009" }, updateBrandKit } as never);
     render(<AssetLibraryPanel />);
@@ -225,6 +225,20 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     await waitFor(() => expect(deleteLibraryAsset).toHaveBeenCalled());
     expect(updateBrandKit).not.toHaveBeenCalled();
+  });
+
+  // 本体は一般向け（ADR-0076 の続き・2026-11-27）＝**画面の側の文**（説明・入力の例）で「会社」と種類に寄せない。
+  // ⚠️ 置いてある素材の名前・タグ（検査のデータに「会社ロゴ」がある）は利用者の中身なので、画面の文だけを見る。
+  it("説明とタグの入力の例は「会社」に寄せない", async () => {
+    const { container } = render(<AssetLibraryPanel />);
+    await screen.findByText("会社ロゴ");
+    const desc = container.querySelector(".page-desc");
+    expect(desc?.textContent).toMatch(/どの動画からでも取り込めます/); // 見ている所が説明文であること
+    expect(desc?.textContent).not.toMatch(/会社/);
+    fireEvent.click(screen.getAllByRole("button", { name: "名前・種類・タグ" })[0]);
+    const placeholders = [...container.querySelectorAll("[placeholder]")].map((e) => e.getAttribute("placeholder") ?? "");
+    expect(placeholders.length).toBeGreaterThan(0);
+    for (const ph of placeholders) expect(ph).not.toMatch(/会社/);
   });
 
   it("名前とタグを直せる（区切りは読点・カンマ・空白）", async () => {
@@ -367,20 +381,20 @@ describe("AssetLibraryPanel", () => {
    * 返して画面を巻き戻すので、戻り値を捨てると**キットは消した素材を指したまま「外しました」**になり、
    * 新しい動画を作るたびにロゴの取り込みが失敗する（PR #888 で潰した失敗に戻る）。
    */
-  it("会社の見た目のロゴを外せなかったら、そう言う", async () => {
+  it("いつもの見た目のロゴを外せなかったら、そう言う", async () => {
     const updateBrandKit = vi.fn(async () => false);
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
     render(<AssetLibraryPanel />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
-    expect(await screen.findByText(/会社の見た目のロゴを外せませんでした/)).toBeInTheDocument();
-    expect(screen.queryByText(/会社の見た目のロゴも外しました/)).toBeNull();
+    expect(await screen.findByText(/いつもの見た目のロゴを外せませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/いつもの見た目のロゴも外しました/)).toBeNull();
   });
 
   /**
    * ⚠️ **次の行動を言葉だけで済ませない**（#1032 ℹ️・§2-5）＝直しに行く場所は設定の**下の方**にあり、
-   * 「会社の見た目から選び直してください」と書くだけでは自分で探させる。断りからそのまま行けるようにする。
+   * 「いつもの見た目から選び直してください」と書くだけでは自分で探させる。断りからそのまま行けるようにする。
    */
   it("そのロゴを外し直しに行ける（断りから直接）", async () => {
     const updateBrandKit = vi.fn(async () => false);
@@ -392,7 +406,7 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     const alert = await screen.findByRole("alert");
-    fireEvent.click(within(alert).getByRole("button", { name: "会社の見た目を決める" }));
+    fireEvent.click(within(alert).getByRole("button", { name: "いつもの見た目を決める" }));
     expect(onNavigate, "行き先へ連れて行っていない").toHaveBeenCalledWith("settings");
     // ⚠️ **欄まで指定する**＝設定は縦に長い（押しても目的の欄が見えない、を作らない）。
     expect(setSettingsFocus, "寄る欄を指定していない").toHaveBeenCalledWith("brandKit");
@@ -400,27 +414,27 @@ describe("AssetLibraryPanel", () => {
 
   // ⚠️ **前の断りの印を持ち越さない**（PR #1097 レビュー 🔴）＝1つずつ見ると通るのに、
   //    「先に立った断り」→「関係ない失敗」の順で操作すると入口が残っていた。
-  it("会社の見た目の断りのあと、関係ない失敗に変わったらその入口は消える", async () => {
+  it("いつもの見た目の断りのあと、関係ない失敗に変わったらその入口は消える", async () => {
     const updateBrandKit = vi.fn(async () => false);
     useProjectStore.setState({ brandKit: { logoLibraryAssetId: "lib_asset_001" }, updateBrandKit } as never);
     render(<AssetLibraryPanel onNavigate={vi.fn()} />);
     await screen.findByText("会社ロゴ");
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
-    await screen.findByText(/会社の見た目のロゴを外せませんでした/);
+    await screen.findByText(/いつもの見た目のロゴを外せませんでした/);
     // そのまま別の素材を編集して、関係ない失敗を起こす。
     vi.mocked(updateLibraryAsset).mockRejectedValueOnce("直せませんでした。もう一度お試しください。");
     fireEvent.click(screen.getAllByRole("button", { name: "名前・種類・タグ" })[1]);
     fireEvent.click(screen.getByRole("button", { name: "直す" }));
     const alert = await screen.findByText(/直せませんでした/);
     expect(
-      within(alert.closest("[role=alert]") as HTMLElement).queryByRole("button", { name: "会社の見た目を決める" }),
+      within(alert.closest("[role=alert]") as HTMLElement).queryByRole("button", { name: "いつもの見た目を決める" }),
       "関係ない失敗に、前の断りの入口が残っている",
     ).toBeNull();
   });
 
   // ⚠️ **別の断りにボタンを付け足さない**＝行き先が関係ない失敗にも出ると、押した先で何もできない。
-  it("会社の見た目と関係ない失敗には、その入口を出さない", async () => {
+  it("いつもの見た目と関係ない失敗には、その入口を出さない", async () => {
     const onNavigate = vi.fn();
     useProjectStore.setState({ brandKit: {}, updateBrandKit: vi.fn(async () => true) } as never);
     vi.mocked(deleteLibraryAsset).mockRejectedValueOnce("素材を外せませんでした。もう一度お試しください。");
@@ -429,13 +443,13 @@ describe("AssetLibraryPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "外す" })[0]);
     fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "外す" }));
     const alert = await screen.findByRole("alert");
-    expect(within(alert).queryByRole("button", { name: "会社の見た目を決める" }), "関係ない失敗に入口が出ている").toBeNull();
+    expect(within(alert).queryByRole("button", { name: "いつもの見た目を決める" }), "関係ない失敗に入口が出ている").toBeNull();
   });
 
   /**
    * ⚠️ **ロゴは置いたあとに選ぶしかない**（差分再監査）＝拡張子では写真と区別できないので
    * `detectAssetType` は必ず `image` を返す。ここで選べないと **ADR-0036 の「いつものロゴ」が
-   * どこからも設定できない**（会社の見た目の選択欄が常に空になる＝§2-5 の行き止まり）。
+   * どこからも設定できない**（いつもの見た目の選択欄が常に空になる＝§2-5 の行き止まり）。
    */
   it("置いた素材の種類を「ロゴ」に直せる", async () => {
     render(<AssetLibraryPanel />);

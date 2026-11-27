@@ -172,7 +172,7 @@ describe('applyBrandKit（既存の動画へ「明示操作で」適用し直す
  * どちらも `newProject` を通るので、そこに置いて両方を固定する。
  */
 describe('新しく作る入口（#888 レビュー 🔴＝主経路に効いていなかった）', () => {
-  it('AI で作る主経路（newProject）でも会社の見た目が入る', async () => {
+  it('AI で作る主経路（newProject）でもいつもの見た目が入る', async () => {
     vi.mocked(loadBrandKit).mockResolvedValue({ fontId: 'kaitou-yokoku-gothic' });
     setProject({ fontId: 'gen-interface-jp' });
     useProjectStore.getState().newProject();
@@ -362,9 +362,9 @@ describe('applyBrandKitToNew（新しい動画へ焼き込む＝決定2）', () 
   });
 });
 
-// 会社の見た目は**丸ごと置き換えて**保存する（`updateBrandKit`）＝1項目だけ渡すと残りが消える。
+// いつもの見た目は**丸ごと置き換えて**保存する（`updateBrandKit`）＝1項目だけ渡すと残りが消える。
 // ⚠️ **フォントを消しただけのつもりで色とロゴまで消えた**（PR #922 レビュー 🔴）ので、ここで固定する。
-describe('持ち込みフォントを消したとき、会社の見た目のほかの項目を巻き添えにしない', () => {
+describe('持ち込みフォントを消したとき、いつもの見た目のほかの項目を巻き添えにしない', () => {
   it('指していたフォントは外れ、色とロゴは残る', async () => {
     useProjectStore.setState({
       brandKit: { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' },
@@ -384,7 +384,7 @@ describe('持ち込みフォントを消したとき、会社の見た目のほ�
     });
   });
 
-  it('別のフォントを消したときは会社の見た目に触らない', async () => {
+  it('別のフォントを消したときはいつもの見た目に触らない', async () => {
     const kit = { fontId: 'user_font_001', colors: ['#112233'], logoLibraryAssetId: 'lib_asset_001' };
     useProjectStore.setState({ brandKit: kit, brandKitUnreadable: false } as never);
 

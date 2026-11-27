@@ -84,7 +84,7 @@ export function UserFontSection() {
         <span className="text-sm text-muted">ttf・otf・woff・woff2</span>
       </div>
       {notice && <p className="field-hint mt">{notice}</p>}
-      {/* 会社の見た目の指定を外した、などの知らせ（うまくいった話なので赤字にしない）。 */}
+      {/* いつもの見た目の指定を外した、などの知らせ（うまくいった話なので赤字にしない）。 */}
       {fontNotice && <p className="field-hint mt">{fontNotice}</p>}
       {fontError && <p className="form-error mt" role="alert">{fontError}</p>}
 

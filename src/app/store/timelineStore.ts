@@ -203,7 +203,7 @@ export type ExportStartBlock = {
 };
 
 /**
- * 新しいタイムライン動画へ**会社の見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
+ * 新しいタイムライン動画へ**いつもの見た目のロゴ**を足す（ADR-0036 決定2・PR #911 レビュー 🟡）。
  *
  * ⚠️ **置き場所は決めない**＝素材の一覧へ足すだけ（場面形式の `importFromLibrary` と同じ）。
  * 見た目パターンの差し込み口から選べるので、置く場所を勝手に決める必要が無い。
@@ -218,16 +218,16 @@ async function withBrandLogo(
   try {
     const list = await listLibraryAssets();
     if (list == null) {
-      return { doc, error: "よく使う素材の一覧を読めませんでした。会社の見た目のロゴは入っていません。" };
+      return { doc, error: "よく使う素材の一覧を読めませんでした。いつもの見た目のロゴは入っていません。" };
     }
     const lib = list.find((a) => a.id === logoLibraryAssetId);
-    if (!lib) return { doc, error: "会社の見た目のロゴが置き場に見つかりませんでした。設定の「会社の見た目」から選び直してください。" };
+    if (!lib) return { doc, error: "いつもの見た目のロゴが置き場に見つかりませんでした。設定の「いつもの見た目」から選び直してください。" };
     const { asset, fileName } = assetFromLibrary(lib, doc.assets.map((a) => a.assetId));
     const relPath = await copyLibraryAssetToProject(logoLibraryAssetId, doc.projectId, fileName);
     return { doc: { ...doc, assets: [...doc.assets, { ...asset, filePath: relPath }] }, added: { assetId: asset.assetId, relPath } };
   } catch {
     // ⚠️ **黙って落とさない**（差分再監査 3巡目 ℹ️・§2-5）＝場面形式は同じ状況で理由を出す。
-    return { doc, error: "会社の見た目のロゴを取り込めませんでした。設定の「会社の見た目」から選び直してください。" };
+    return { doc, error: "いつもの見た目のロゴを取り込めませんでした。設定の「いつもの見た目」から選び直してください。" };
   }
 }
 
@@ -1309,7 +1309,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
     const now = new Date().toISOString();
     const blank = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
-    // ⚠️ **会社の見た目を新しい動画へ**（ADR-0036 決定2・差分再監査 2巡目）＝場面形式は `newProject` が
+    // ⚠️ **いつもの見た目を新しい動画へ**（ADR-0036 決定2・差分再監査 2巡目）＝場面形式は `newProject` が
     // 通すのに、こちらは通らず**「タイムラインで作った動画にだけ効かない」**（ADR-0026②）。
     // ⚠️ **キットは読み直してから使う**（設定直後でも効く＝場面形式と同じ流儀）。
     await useProjectStore.getState().refreshBrandKit();

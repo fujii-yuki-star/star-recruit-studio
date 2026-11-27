@@ -50,7 +50,7 @@ describe('最後の場面', () => {
     expect(Math.abs(bar.y - (1080 - (text.y + text.h)))).toBeLessThanOrEqual(1);
   });
 
-  it('差し色は会社の色があればそれ、無ければ既定（線と下の帯の両方）', () => {
+  it('差し色はいつもの色があればそれ、無ければ既定（線と下の帯の両方）', () => {
     const own = buildBriefingClosingScene(input({ accentColor: '#cc3300' }))!;
     expect([byName(own.freeLayout, '差し色').fillColor, byName(own.freeLayout, '下の帯').fillColor]).toEqual(['#cc3300', '#cc3300']);
     const def = buildBriefingClosingScene(input({ accentColor: null }))!;

@@ -248,7 +248,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
           場面編集を開く
         </button>
-        {/* 会社の見た目（ADR-0036）への入口（#1032）。見た目を選んでいるときにこそ思い出すのに、
+        {/* いつもの見た目（ADR-0036）への入口（#1032）。見た目を選んでいるときにこそ思い出すのに、
             設定画面の奥だけにしか入口が無かった。 */}
         <BrandKitLink onNavigate={onNavigate} />
       </div>

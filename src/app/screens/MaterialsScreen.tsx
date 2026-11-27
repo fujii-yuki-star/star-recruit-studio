@@ -177,7 +177,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         }
       />
 
-      {/* 会社の見た目（ADR-0036）への入口（#1032）。素材を選んでいるときにこそ思い出すのに、
+      {/* いつもの見た目（ADR-0036）への入口（#1032）。素材を選んでいるときにこそ思い出すのに、
           設定画面の奥だけにしか入口が無かった。 */}
       <BrandKitLink onNavigate={onNavigate} />
 

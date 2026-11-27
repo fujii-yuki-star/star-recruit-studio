@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 会社の見た目（ブランドキット・ADR-0036・#351）。
+// いつもの見た目（ブランドキット・ADR-0036・#351）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -55,6 +55,16 @@ describe("BrandKitSection", () => {
    * たたき台・公開前チェック・編集のツールバーにしか置いていない。**その場に押すものが無い**のに
    * 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
    */
+  // 画面名は「いつもの見た目」（ADR-0036 追補 2026-11-27）＝本体は一般向け。**節まるごと**で「会社」を探す。
+  it("節の名前は「いつもの見た目」で、節のどこにも「会社」と出さない（画面まるごと）", () => {
+    const { container } = render(<BrandKitSection />);
+    expect(screen.getByRole("heading", { name: "いつもの見た目" })).toBeTruthy();
+    expect(container.textContent).toMatch(/いつもの色/);
+    const attrs = [...container.querySelectorAll("[placeholder], [aria-label], [title]")]
+      .flatMap((e) => ["placeholder", "aria-label", "title"].map((a) => e.getAttribute(a) ?? ""));
+    expect([container.textContent ?? "", ...attrs].join("\n")).not.toMatch(/会社/);
+  });
+
   it("反映したら、その場で戻せる導線を出す（案内だけにしない）", async () => {
     const applyBrandKit = vi.fn(async () => ({ ok: true, applied: true, addedLogo: false, error: null }));
     const undo = vi.fn();
@@ -257,10 +267,10 @@ describe("BrandKitSection", () => {
   // ⚠️ **読めていないことを言う**（`/canon-check` 🟡・§2-5）＝黙っていると**空のキット**
   //（「覚えない」・色0件・ロゴ無し）を見せる。兄弟の欄（よく使う素材・文字の形）は同じ状況で
   // 「読めませんでした」と言うので、ここだけ黙ると**同じ状況で違うことを言う**（ADR-0026②）。
-  it("会社の見た目を読めていないときは、その旨を出す（空のキットに見せない）", () => {
+  it("いつもの見た目を読めていないときは、その旨を出す（空のキットに見せない）", () => {
     useProjectStore.setState({ brandKit: {}, brandKitUnreadable: true } as never);
     render(<BrandKitSection />);
-    expect(screen.getByText(/会社の見た目を読めませんでした/)).toBeInTheDocument();
+    expect(screen.getByText(/いつもの見た目を読めませんでした/)).toBeInTheDocument();
     expect(screen.getByText(/いまは変更できません/)).toBeInTheDocument();
   });
 
@@ -296,7 +306,7 @@ describe("BrandKitSection", () => {
   it("読めているときは出さない（毎回出すと意味が薄れる）", () => {
     useProjectStore.setState({ brandKit: {}, brandKitUnreadable: false } as never);
     render(<BrandKitSection />);
-    expect(screen.queryByText(/会社の見た目を読めませんでした/)).toBeNull();
+    expect(screen.queryByText(/いつもの見た目を読めませんでした/)).toBeNull();
   });
 
   // ⚠️ **入らなかったものがあれば言う**（#929・§2-5）＝黙ると「ロゴだけ入ったのに反映しました」

@@ -1,4 +1,4 @@
-// 「会社の見た目」（ブランドキット・ADR-0036）への入口（#1032）。
+// 「いつもの見た目」（ブランドキット・ADR-0036）への入口（#1032）。
 //
 // ⚠️ **入口が設定画面の奥だけだった**＝よく使う文字の形・色・ロゴを決める場所は、
 // **素材を選んでいるとき・見た目を選んでいるとき**にこそ思い出すのに、そこからは辿れなかった。
@@ -9,7 +9,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 
 /** 押す言葉（§2-3＝「ブランドキット」は出さない）。 */
-export const BRAND_KIT_LINK_LABEL = "会社の見た目を決める";
+export const BRAND_KIT_LINK_LABEL = "いつもの見た目を決める";
 
 export function BrandKitLink({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
   const setSettingsFocus = useProjectStore((s) => s.setSettingsFocus);

@@ -577,14 +577,14 @@ interface ProjectState {
   /** ブランドキットを読み直す（#351）。 */
   refreshBrandKit: () => Promise<void>;
   /**
-   * 会社の見た目を覚え直す（#351）。**書けたら `true`**（α-6 出口監査 🟡23）。
+   * いつもの見た目を覚え直す（#351）。**書けたら `true`**（α-6 出口監査 🟡23）。
    * ⚠️ **書けなかったら画面を戻して理由を `brandKitError` に置く**＝保存できていないのに覚えた顔をしない。
    */
   updateBrandKit: (next: BrandKit) => Promise<boolean>;
-  /** 会社の見た目の保存で出た理由（§2-5）。 */
+  /** いつもの見た目の保存で出た理由（§2-5）。 */
   brandKitError: string | null;
   /**
-   * 会社の見た目を**読めなかった**か（差分再監査 3巡目）。**「何も覚えていない」とは別**＝
+   * いつもの見た目を**読めなかった**か（差分再監査 3巡目）。**「何も覚えていない」とは別**＝
    * 空に潰すと、直後の書き込みが**覚えていた中身をそのまま上書き**して消える。
    */
   brandKitUnreadable: boolean;
@@ -668,7 +668,7 @@ interface ProjectState {
    */
   captureVideoFrame: (videoAssetId: string, atSec: number) => Promise<string | null>;
   clearImportError: () => void;
-  /** 読めなくなった会社の見た目を作り直す（`updateBrandKit` の門の唯一の出口・§2-5）。 */
+  /** 読めなくなったいつもの見た目を作り直す（`updateBrandKit` の門の唯一の出口・§2-5）。 */
   rebuildBrandKit: () => Promise<boolean>;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
@@ -1177,7 +1177,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
-    // ⚠️ **新しい動画には会社の見た目を焼き込む**（ADR-0036 決定2＝コピー）。
+    // ⚠️ **新しい動画にはいつもの見た目を焼き込む**（ADR-0036 決定2＝コピー）。
     // ⚠️ **`newProject` に置く**（PR #888 レビュー 🔴）＝以前は「白紙から作る」だけに入れていたので、
     // **主経路（AI で作る）に効いていなかった**。どちらも `newProject` を通るので、ここに置けば両方に効く。
     // フォントは `videoSettings` へ、ロゴは**ライブラリからの取り込みと同じ経路**（`asset_NNN` を採番）。
@@ -2772,7 +2772,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     //（`applyBrandKitToNew` はこの関数を呼ぶ＝外側のガードだけでは守れない窓）。
     const stillOpen = sameDocGuard(get);
     // 出どころ（棚／拡張パックの音楽）と「読めなかった」「見つからない」の断りは `resolveLibrarySource` が1か所で持つ
-    //（会社の見た目のロゴを足す経路で「「よく使う素材」に置いてあるか確かめてください」に化けないよう、読めないと無いを分ける）。
+    //（いつもの見た目のロゴを足す経路で「「よく使う素材」に置いてあるか確かめてください」に化けないよう、読めないと無いを分ける）。
     const resolved = await resolveLibrarySource(libraryAssetId, get().packs);
     if (!resolved.ok) { set({ importError: resolved.error }); return done(null); }
     const { lib, copy } = resolved.source;
@@ -2994,7 +2994,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ brandKit: kit, brandKitUnreadable: false });
   },
   /**
-   * 会社の見た目を**丸ごと置き換えて**保存する。
+   * いつもの見た目を**丸ごと置き換えて**保存する。
    *
    * ⚠️ **足りない項目は「変えない」ではなく「消す」**＝呼ぶ側は必ず `{ ...brandKit, 変える項目 }` の形で
    * 渡すこと（1項目だけ渡すと**残りが消える**・PR #922 レビュー 🔴 の実例）。
@@ -3004,7 +3004,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **読めていないものを上書きしない**（差分再監査 3巡目 🟡）＝覚えている中身が分からない
     // 状態で書くと、消えたことにも気づけない。
     if (get().brandKitUnreadable) {
-      set({ brandKitError: "会社の見た目を読めませんでした。中身を失わないよう、変えられません。アプリを開き直してください。" });
+      set({ brandKitError: "いつもの見た目を読めませんでした。中身を失わないよう、変えられません。アプリを開き直してください。" });
       return false;
     }
     // ⚠️ **書けなかったら覚えた顔をしない**（α-6 出口監査 🟡23・§2-5）＝画面だけ変えて保存に失敗すると、
@@ -3023,11 +3023,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   /**
-   * 読めなくなった会社の見た目を**作り直す**（差分再監査 🟡・§2-5＝行き止まりを作らない）。
+   * 読めなくなったいつもの見た目を**作り直す**（差分再監査 🟡・§2-5＝行き止まりを作らない）。
    *
    * ⚠️ **上書きを断る門の唯一の出口**＝`updateBrandKit` は読めていない間ずっと断り、`brandKitUnreadable`
    * を下ろすのは**読み込みの成功だけ**。ファイルが本当に壊れていると開き直しても直らないので、
-   * **アプリの中から会社の見た目を二度と変えられなくなる**（案内の「開き直す」にも従えない）。
+   * **アプリの中からいつもの見た目を二度と変えられなくなる**（案内の「開き直す」にも従えない）。
    * ⚠️ **黙って上書きしない**＝これは**利用者が明示的に押したときだけ**通る道で、
    * 押す前に「覚えていた内容は失われる」と伝えるのは画面の役目。
    */
@@ -3070,7 +3070,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (get().brandKit.fontId === fontId) {
         // ⚠️ **いまの中身を広げてから外す**（PR #922 レビュー 🔴）＝`updateBrandKit` は**丸ごと
         // 置き換える**ので、`{ fontId: undefined }` だけ渡すと**色とロゴを巻き添えで消す**
-        //（フォントを消しただけのつもりが会社の見た目が空になる・§2-5）。他の呼び出しは
+        //（フォントを消しただけのつもりがいつもの見た目が空になる・§2-5）。他の呼び出しは
         // 例外なく `...brandKit` を先に広げている＝ここだけ抜けていた。
         const ok = await get().updateBrandKit({ ...get().brandKit, fontId: undefined });
         // ⚠️ **うまくいったほうは知らせの側へ**（`/canon-check` ℹ️）＝赤字で出すと失敗に見える。

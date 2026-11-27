@@ -1,4 +1,4 @@
-// 会社の見た目を**読めなかったとき**は書かせない（差分再監査 3巡目・PR #912 レビュー ℹ️）。
+// いつもの見た目を**読めなかったとき**は書かせない（差分再監査 3巡目・PR #912 レビュー ℹ️）。
 //
 // ⚠️ **空に潰すと消える**＝「何も覚えていない」に見せた直後の書き込みが、覚えていた字体・色・ロゴを
 // **そのまま上書き**する。目録（`parse_manifest`）も読み方辞書も、同じ状況では断ってファイルを守る。
@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-describe('会社の見た目が読めないとき', () => {
+describe('いつもの見た目が読めないとき', () => {
   it('読めなかったら、覚えている中身を空に潰さない', async () => {
     vi.mocked(loadBrandKit).mockResolvedValue(null);
     await useProjectStore.getState().refreshBrandKit();
