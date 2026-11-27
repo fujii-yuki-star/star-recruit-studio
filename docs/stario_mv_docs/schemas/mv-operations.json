@@ -150,6 +150,19 @@
               {
                 "type": "object",
                 "additionalProperties": false,
+                "required": ["op", "layerId"],
+                "description": "親を付ける・外す（MV-0010 決定5＝AE の親子付け）。parentId に同じコンポジションのレイヤー（null で外す）。親の変形（位置・アンカー・大きさ・回転）が子に掛かる（不透明度は引き継がない）。keepAppearance（既定 true）＝frame（既定 0）の時刻で見た目が変わらないよう、子の位置・大きさ・回転を直してから付ける。子の位置・大きさ・回転がキーフレームのときは保てない＝保たずに付けて warnings で知らせる。親が縦横別の大きさで回転もしているときは近い形にして知らせる。parentId だけを変えたいなら updateLayer（見た目は保たない）。",
+                "properties": {
+                  "op": { "const": "setParent" },
+                  "layerId": { "type": "string" },
+                  "parentId": { "type": ["string", "null"] },
+                  "keepAppearance": { "type": "boolean" },
+                  "frame": { "type": "integer" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
                 "required": ["op", "composition"],
                 "description": "コンポジションを足す。composition には name・width・height・fps（{num, den}）・durationFrames を書く（background は既定で黒・layers と markers は空）。",
                 "properties": {

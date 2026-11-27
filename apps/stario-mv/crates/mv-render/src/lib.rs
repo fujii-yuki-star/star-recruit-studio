@@ -385,12 +385,24 @@ impl Renderer {
             .ok_or_else(|| RenderError::CompositionNotFound(composition_id.into()))?;
         let mut out = Vec::new();
         for layer in shown_layers(comp, frame) {
+            // ヌルは描かないが、選べる・掴めるように 100×100 の枠を返す（AE のヌルと同じ＝MV-0010 決定5）
+            if layer.layer_type == LayerType::Null {
+                let m = mv_core::eval::world_matrix(comp, layer, frame as f64)
+                    .map_err(RenderError::eval)?;
+                out.push(LayerQuad {
+                    layer_id: layer.id.clone(),
+                    corners: quad_of(m, NULL_SIZE, NULL_SIZE),
+                    parent_linear: parent_linear(comp, layer, frame)?,
+                });
+                continue;
+            }
             if let Some((content, m)) =
                 self.layer_content(project, comp, layer, frame, project_dir)?
             {
                 out.push(LayerQuad {
                     layer_id: layer.id.clone(),
                     corners: quad_of(m, content.width, content.height),
+                    parent_linear: parent_linear(comp, layer, frame)?,
                 });
             }
         }
@@ -411,6 +423,8 @@ impl Renderer {
         if t.opacity <= 0.0 {
             return Ok(None);
         }
+        // 親の変形まで掛ける（MV-0010 決定5）。⚠️ 不透明度は自分のだけ（親のは引き継がない）
+        let world = mv_core::eval::world_matrix(comp, layer, f).map_err(RenderError::eval)?;
         // 拡大されても粗くならない細かさ（1〜8 倍）
         let k = t.scale[0]
             .abs()
@@ -473,6 +487,8 @@ impl Renderer {
                 }
             }
             LayerType::Audio => return Ok(None),
+            // ヌルは描かない（親にするための入れ物＝MV-0010 決定5）
+            LayerType::Null => return Ok(None),
             LayerType::Video => {
                 // ⚠️ 映像のコマは控えに入れない（毎コマ変わる＝控えると記憶を食いつぶす）
                 let (kind, path) = asset_path(project, layer, project_dir)?;
@@ -536,7 +552,7 @@ impl Renderer {
                     content.origin[0],
                     content.origin[1],
                 ];
-                return Ok(Some((content, mul(t.matrix(), px_to_local))));
+                return Ok(Some((content, mul(world, px_to_local))));
             }
             other => {
                 return Err(RenderError::NotYetSupported(format!(
@@ -570,7 +586,7 @@ impl Renderer {
             content.origin[0],
             content.origin[1],
         ];
-        Ok(Some((content, mul(t.matrix(), px_to_local))))
+        Ok(Some((content, mul(world, px_to_local))))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -919,6 +935,28 @@ fn blend_id(m: BlendMode) -> u32 {
 pub struct LayerQuad {
     pub layer_id: String,
     pub corners: [[f64; 2]; 4],
+    /// 親の変形の向きと大きさ（[a, b, c, d]・親が無ければ単位）。画面で掴んだ量を、位置（親の座標）の差へ戻すのに使う。
+    pub parent_linear: [f64; 4],
+}
+
+/// ヌルの枠の大きさ（レイヤーの座標・AE のヌルと同じ 100×100）。
+pub const NULL_SIZE: u32 = 100;
+
+/// 親の変形（親の親まで）の向きと大きさの部分。親が無ければ単位。
+fn parent_linear(
+    comp: &mv_core::model::Composition,
+    layer: &mv_core::model::Layer,
+    frame: i64,
+) -> Result<[f64; 4], RenderError> {
+    let Some(p) = layer
+        .parent_id
+        .as_deref()
+        .and_then(|id| comp.layers.iter().find(|l| l.id == id))
+    else {
+        return Ok([1.0, 0.0, 0.0, 1.0]);
+    };
+    let m = mv_core::eval::world_matrix(comp, p, frame as f64).map_err(RenderError::eval)?;
+    Ok([m[0], m[1], m[2], m[3]])
 }
 
 /// そのフレームで見えているレイヤー（見せる設定・見える範囲・ソロ）。並びは先頭が最前面。

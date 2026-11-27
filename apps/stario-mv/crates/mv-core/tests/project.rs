@@ -177,19 +177,12 @@ fn 親が自分_見つからない_循環() {
     text_layer(&mut p).parent_id = Some(own);
     assert_eq!(
         codes(&p),
-        vec![
-            IssueCode::SelfReference,
-            IssueCode::NotYetSupported,
-            IssueCode::ParentCycle
-        ]
+        vec![IssueCode::SelfReference, IssueCode::ParentCycle]
     );
 
     let mut p = minimal();
     text_layer(&mut p).parent_id = Some(new_id(IdKind::Layer));
-    assert_eq!(
-        codes(&p),
-        vec![IssueCode::MissingReference, IssueCode::NotYetSupported]
-    );
+    assert_eq!(codes(&p), vec![IssueCode::MissingReference]);
 
     let mut p = minimal();
     let a = p.compositions[0].layers[0].id.clone();
@@ -202,6 +195,19 @@ fn 親が自分_見つからない_循環() {
         2,
         "{c:?}"
     );
+}
+
+/// MV-0010 決定5：γ0.2 から親子付けとヌルは描ける（「まだ描けない」と言わない）。
+#[test]
+fn 親子付けとヌルは問題にしない() {
+    let mut p = minimal();
+    let null = p.compositions[0].layers[1].id.clone();
+    let l = solid_layer(&mut p);
+    l.layer_type = LayerType::Null;
+    l.solid = None;
+    // 文字をヌルの子にする
+    text_layer(&mut p).parent_id = Some(null);
+    assert_eq!(codes(&p), vec![]);
 }
 
 #[test]
@@ -275,14 +281,6 @@ fn まだ描けない機能は知らせる() {
                     kind: LinkKind::Beat,
                     amount: 1.0,
                 }])
-            }),
-        ),
-        (
-            "ヌルのレイヤー",
-            Box::new(|p| {
-                let l = solid_layer(p);
-                l.layer_type = LayerType::Null;
-                l.solid = None;
             }),
         ),
         (

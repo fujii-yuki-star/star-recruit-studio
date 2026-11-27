@@ -224,11 +224,11 @@ fn 検査に問題が残る取引は何も変えない() {
         before,
         "1つでも通らなければ全体を変えない"
     );
-    // 中身の問題（まだ描けない機能＝親子付け）
+    // 中身の問題（まだ描けない機能＝トラックマット・γ0.6。⚠️ 親子付けは γ0.2 で描けるようになった）
     let out = tx(
         &mut ops,
         &dir,
-        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "parentId": BG } }]}),
+        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "trackMatte": { "layerId": BG, "mode": "alpha" } } }]}),
     );
     assert!(out.is_error);
     assert_eq!(out.json["issues"][0]["stage"], "content");
@@ -295,7 +295,7 @@ fn 試すだけなら保存しない() {
     let out = tx(
         &mut ops,
         &dir,
-        json!({ "dryRun": true, "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "parentId": BG } }]}),
+        json!({ "dryRun": true, "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "trackMatte": { "layerId": BG, "mode": "alpha" } } }]}),
     );
     assert!(!out.is_error);
     assert_eq!(out.json["issues"][0]["code"], "NotYetSupported");
@@ -799,4 +799,162 @@ fn 壊れた中身は履歴の最後から開き直せる() {
     assert_eq!(name_of(&dir), "最後");
     // 開き直したあとも、そのまま戻せる（履歴の版と同じ中身を書く）
     assert!(ai.call("undo", &json!({ "project": p(&dir) })).is_ok());
+}
+
+/// そのレイヤーの、そのフレームでの「レイヤーの座標 → コンポジションの座標」。
+fn world_of(dir: &Path, id: &str, frame: f64) -> [f64; 6] {
+    let p = mv_core::io::load_project(dir).unwrap().project;
+    let c = &p.compositions[0];
+    let l = c.layers.iter().find(|l| l.id == id).unwrap();
+    mv_core::eval::world_matrix(c, l, frame).unwrap()
+}
+
+fn close6(a: [f64; 6], b: [f64; 6]) -> bool {
+    a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4)
+}
+
+/// MV-0010 決定5：親を付ける・外すとき、見た目を保つ（AE と同じ）。
+#[test]
+fn 親は見た目を保って付け外しできる() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    let nid = mv_core::id::new_id(mv_core::id::IdKind::Layer);
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "addLayer", "layer": { "id": nid, "name": "親", "type": "null",
+            "transform": { "position": { "value": [100, 50] }, "scale": { "value": [2, 2] }, "rotation": { "value": 90 } } } }]}),
+    );
+    let before = world_of(&dir, BG, 0.0);
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setParent", "layerId": BG, "parentId": nid }]}),
+    );
+    assert_eq!(out.json["applied"], true, "{}", out.json);
+    let (doc, _) = read_doc(&dir).unwrap();
+    let l = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == BG)
+        .unwrap()
+        .clone();
+    assert_eq!(l["parentId"], json!(nid));
+    assert!(
+        close6(world_of(&dir, BG, 0.0), before),
+        "見た目（コンポジションの座標）が変わらない"
+    );
+    assert_eq!(out.json["warnings"], json!([]));
+    // 外すときも見た目を保つ
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setParent", "layerId": BG, "parentId": null }]}),
+    );
+    assert!(close6(world_of(&dir, BG, 0.0), before));
+    let (doc, _) = read_doc(&dir).unwrap();
+    let l = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == BG)
+        .unwrap()
+        .clone();
+    assert_eq!(l["parentId"], Value::Null);
+    // 保たない付け方＝変形はそのまま・親の変形が掛かる
+    let t0 = l["transform"].clone();
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setParent", "layerId": BG, "parentId": nid, "keepAppearance": false }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    let l = doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == BG)
+        .unwrap()
+        .clone();
+    assert_eq!(l["transform"], t0);
+    assert!(!close6(world_of(&dir, BG, 0.0), before));
+}
+
+/// 保てないとき（キーフレーム・ゆがみ）は知らせる。自分・循環・別のコンポジションは断る。
+#[test]
+fn 親を付けられないときと保てないとき() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    let (a, b) = (
+        mv_core::id::new_id(mv_core::id::IdKind::Layer),
+        mv_core::id::new_id(mv_core::id::IdKind::Layer),
+    );
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [
+            { "op": "addLayer", "layer": { "id": a, "name": "ゆがむ親", "type": "null",
+                "transform": { "scale": { "value": [2, 1] }, "rotation": { "value": 30 } } } },
+            { "op": "addLayer", "layer": { "id": b, "name": "子", "type": "null", "parentId": a } },
+        ]}),
+    );
+    // 循環（a の親に、a の子の b）
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir), "ops": [{ "op": "setParent", "layerId": a, "parentId": b }] }))
+        .unwrap_err();
+    assert!(e.message.contains("輪になります"), "{}", e.message);
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir), "ops": [{ "op": "setParent", "layerId": a, "parentId": a }] }))
+        .unwrap_err();
+    assert!(e.message.contains("自分自身"), "{}", e.message);
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir), "ops": [{ "op": "setParent", "layerId": a, "parentId": "lyr_01JDQ0000000000000000000ZZ" }] }))
+        .unwrap_err();
+    assert!(e.message.contains("見つかりません"), "{}", e.message);
+    // ゆがむ親（縦横の大きさが違い回転している）に、回転した子を付ける＝近い形にして知らせる
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": BG, "patch": { "transform": { "rotation": { "value": 45 } } } }]}),
+    );
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setParent", "layerId": BG, "parentId": a }]}),
+    );
+    assert_eq!(out.json["applied"], true);
+    assert!(
+        out.json["warnings"][0].as_str().unwrap().contains("ゆがみ"),
+        "{}",
+        out.json["warnings"]
+    );
+    // キーフレームの子は保たずに付けて知らせる
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [
+            { "op": "setParent", "layerId": TITLE, "parentId": null, "keepAppearance": false },
+            { "op": "updateLayer", "layerId": TITLE, "patch": { "transform": { "position": { "value": null,
+                "keyframes": [{ "frame": 0, "value": [0, 0], "interpolation": "linear" }, { "frame": 10, "value": [50, 0], "interpolation": "linear" }] } } } },
+        ]}),
+    );
+    let before = world_of(&dir, TITLE, 0.0);
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setParent", "layerId": TITLE, "parentId": a }]}),
+    );
+    assert!(
+        out.json["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("見た目を保たずに"),
+        "{}",
+        out.json["warnings"]
+    );
+    assert!(
+        !close6(world_of(&dir, TITLE, 0.0), before),
+        "保っていない＝親の変形がそのまま掛かる"
+    );
 }

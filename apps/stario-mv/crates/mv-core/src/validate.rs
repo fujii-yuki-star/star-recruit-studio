@@ -37,8 +37,6 @@ pub struct Issue {
 
 /// まだ使えない機能と、使えるようになる版（ADR-0074 決定6 の表から）。⚠️ **1か所に置く**。
 const NOT_YET: &[(&str, &str)] = &[
-    ("親子付け", "γ0.2"),
-    ("ヌルのレイヤー", "γ0.2"),
     ("入れ子のコンポジション", "γ0.2"),
     ("タイムリマップ", "γ0.2"),
     ("2.5D（奥行き・カメラ）", "γ0.2"),
@@ -209,11 +207,6 @@ impl Checker {
                     format!("親のレイヤー（{pid}）が同じコンポジションに見つかりません。"),
                 );
             }
-            self.push(
-                IssueCode::NotYetSupported,
-                format!("{lpath}/parentId"),
-                not_yet("親子付け"),
-            );
         }
         if let Some(tm) = &l.track_matte {
             if tm.layer_id == l.id {
@@ -272,11 +265,6 @@ impl Checker {
 
         // まだ描けない種類・機能
         match l.layer_type {
-            LayerType::Null => self.push(
-                IssueCode::NotYetSupported,
-                format!("{lpath}/type"),
-                not_yet("ヌルのレイヤー"),
-            ),
             LayerType::Camera => self.push(
                 IssueCode::NotYetSupported,
                 format!("{lpath}/type"),
