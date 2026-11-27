@@ -155,6 +155,12 @@ async fn edit_apply(
     r
 }
 
+/// 値の欄に出す、動かせる値の今の時刻での値（描画の核と同じ計算＝MV-0008 決定5）。
+#[tauri::command]
+fn edit_eval(layer: Value, frame: i64) -> Value {
+    edit::eval_values(&layer, frame)
+}
+
 /// 掴んで動かしている途中の編集を、プレビューに試しとして渡す（保存しない）。`ops` が無ければやめる。
 #[tauri::command]
 fn edit_trial(ops: Option<Vec<Value>>, tx: tauri::State<PreviewTx>) -> Result<(), String> {
@@ -254,7 +260,8 @@ pub fn run() {
             preview_set_muted,
             edit_read,
             edit_apply,
-            edit_trial
+            edit_trial,
+            edit_eval
         ])
         .run(tauri::generate_context!())
         .expect("すたりおMV を起動できませんでした");

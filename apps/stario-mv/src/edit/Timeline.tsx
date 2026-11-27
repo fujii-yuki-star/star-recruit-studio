@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { moveOps, rangeSelect, renameOp, reorderOps, toggleOp, trimInOps, trimOutOps, withTrial } from "./layerOps";
 import { fitPxPerFrame, frameToX, snapOffset, snapTargets, xToFrame, zoomed } from "./timelineMath";
+import { keyFramesOf } from "./props";
 import type { Composition, Layer, Op } from "./types";
 
 /** 行の高さ・名前の列の幅・目盛りの高さ（画素）。 */
@@ -330,6 +331,16 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                   onPointerDown={(e) => startBar(e, l)}
                   title={`${l.name}（${l.inFrame}〜${l.outFrame - 1}）`}
                 />
+                {/* キーのある時刻（掴んで動かすのは γ0.2＝MV-0008 決定5） */}
+                {keyFramesOf(l).map((f) => (
+                  <span
+                    key={f}
+                    className="tl-key"
+                    data-testid={`key-${l.id}-${f}`}
+                    style={{ left: frameToX(f, ppf) }}
+                    aria-hidden="true"
+                  />
+                ))}
               </div>
             </div>
           );

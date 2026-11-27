@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { EditDoc, Op } from "./types";
+import type { AnimValue, EditDoc, Layer, Op } from "./types";
 
 /** 反映の結果（`applyTransaction` の結果＋当て直したか＝Rust の `edit::apply`）。 */
 export interface ApplyResult {
@@ -21,4 +21,6 @@ export const editApi = {
     invoke("edit_apply", { dir, ops, baseRevision }),
   /** 掴んで動かしている途中の見え方（保存しない）。`null` でやめる。 */
   trial: (ops: Op[] | null): Promise<void> => invoke("edit_trial", { ops }),
+  /** レイヤーの動かせる値の、そのフレームでの値（描画の核と同じ計算）。`{ "/transform/position": [x, y], … }`。 */
+  eval: (layer: Layer, frame: number): Promise<Record<string, AnimValue>> => invoke("edit_eval", { layer, frame }),
 };

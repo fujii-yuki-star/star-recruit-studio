@@ -1,11 +1,20 @@
 // タイムラインの操作 → 取引の中身（MV-0008 決定4 の表）。画面に依存しない純粋な関数。
 // ⚠️ ここでは**組み立てるだけ**。検査と保存は Rust の取引（外部 AI と同じ道＝決定1）。
 // ⚠️ 錠のかかったレイヤーは動かさない・消さない（AE の型＝錠は編集から守る）。
+import { shiftKeyframesPatch } from "./props";
 import type { Composition, Layer, Op } from "./types";
 
-/** ずらす＝見えている範囲と素材の時刻を同じだけ（中身は動かない）。 */
-export function shiftPatch(l: Layer, delta: number): Record<string, number> {
-  return { inFrame: l.inFrame + delta, outFrame: l.outFrame + delta, startFrame: l.startFrame + delta };
+/**
+ * ずらす＝見えている範囲と素材の時刻を同じだけ（中身は動かない）。
+ * キーフレームも同じだけずらす（AE の型＝キーの frame はコンポジションのフレームなので、ずらさないと動きだけ残る）。
+ */
+export function shiftPatch(l: Layer, delta: number): Record<string, unknown> {
+  return {
+    inFrame: l.inFrame + delta,
+    outFrame: l.outFrame + delta,
+    startFrame: l.startFrame + delta,
+    ...shiftKeyframesPatch(l, delta),
+  };
 }
 
 function editable(comp: Composition, ids: ReadonlySet<string>): Layer[] {
@@ -150,20 +159,29 @@ export function rangeSelect(comp: Composition, anchor: string, to: string): stri
 }
 
 /**
- * 掴んでいる途中の見え方＝試しの中の時刻の変更（`updateLayer` の inFrame・outFrame・startFrame）だけを当てた写し。
- * ⚠️ プレビューは Rust が試しを描くが、**タイムラインの帯も一緒に動かす**（離すまで帯が止まって見えないように）。
+ * 掴んでいる途中の見え方＝試しの `updateLayer` を当てた写し（JSON Merge Patch＝Rust の取引と同じ当て方）。
+ * ⚠️ プレビューは Rust が試しを描くが、**タイムラインの帯とキーの◆も一緒に動かす**（離すまで止まって見えないように）。
+ * 並びを変える・消す・分ける編集は見え方に当てない（離したあと読み直したものを描く）。
  */
 export function withTrial(layers: readonly Layer[], ops: readonly Op[]): Layer[] {
-  const patch = new Map<string, Partial<Layer>>();
+  let out = [...layers];
   for (const o of ops) {
     if (o.op !== "updateLayer") continue;
-    const p: Partial<Layer> = {};
-    for (const k of ["inFrame", "outFrame", "startFrame"] as const) {
-      const v = o.patch[k];
-      if (typeof v === "number") p[k] = v;
-    }
-    patch.set(o.layerId, { ...patch.get(o.layerId), ...p });
+    out = out.map((l) => (l.id === o.layerId ? (mergePatch(l, o.patch) as Layer) : l));
   }
-  return patch.size === 0 ? [...layers] : layers.map((l) => (patch.has(l.id) ? { ...l, ...patch.get(l.id) } : l));
+  return out;
+}
+
+/** JSON Merge Patch（RFC 7386＝Rust の `tx::merge_patch` と同じ）。元は変えない。 */
+export function mergePatch(target: unknown, patch: unknown): unknown {
+  if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
+  const base =
+    target !== null && typeof target === "object" && !Array.isArray(target) ? { ...(target as object) } : {};
+  const out = base as Record<string, unknown>;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else out[k] = mergePatch(out[k], v);
+  }
+  return out;
 }
 

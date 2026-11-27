@@ -27,7 +27,61 @@ export interface Layer {
   outFrame: number;
   /** 素材の時刻 0 を置くフレーム。 */
   startFrame: number;
+  blendMode?: BlendMode;
+  transform?: Partial<Record<TransformKey, Animatable>>;
+  text?: { text: string; fontFamily: string; fontSize: number; fill: Color } & Record<string, unknown>;
+  solid?: { color: Color; width: number; height: number };
+  shape?: { kind: "rectangle" | "ellipse" | "path"; size?: Animatable; cornerRadius?: Animatable; fill?: Color } & Record<
+    string,
+    unknown
+  >;
 }
+
+/** 色＝[赤, 緑, 青, 不透明度]、各 0〜1（sRGB）。 */
+export type Color = [number, number, number, number];
+
+export type TransformKey = "anchor" | "position" | "scale" | "rotation" | "opacity";
+
+/** 値（数か、数の並び）。 */
+export type AnimValue = number | number[];
+
+/** キーフレーム（frame はコンポジションのフレーム）。 */
+export interface Keyframe {
+  frame: number;
+  value: AnimValue;
+  interpolation: "hold" | "linear" | "bezier";
+  [k: string]: unknown;
+}
+
+/** 動かせる値＝固定値・キーフレーム・式のどれか1つ（schema の `Animatable`）。 */
+export interface Animatable {
+  value?: AnimValue;
+  keyframes?: Keyframe[];
+  expression?: { language: string; source: string };
+  [k: string]: unknown;
+}
+
+/** 描画モード（schema の `BlendMode`）。⚠️ 並びは schema と同じ。 */
+export const BLEND_MODES = [
+  "normal",
+  "add",
+  "multiply",
+  "screen",
+  "overlay",
+  "softLight",
+  "hardLight",
+  "colorDodge",
+  "colorBurn",
+  "darken",
+  "lighten",
+  "difference",
+  "exclusion",
+  "hue",
+  "saturation",
+  "color",
+  "luminosity",
+] as const;
+export type BlendMode = (typeof BLEND_MODES)[number];
 
 export interface Marker {
   id: string;
@@ -71,3 +125,6 @@ export type Op =
   | { op: "removeLayer"; layerId: string }
   | { op: "moveLayer"; layerId: string; index: number }
   | { op: "splitLayer"; layerId: string; frame: number };
+
+/** レイヤーを直す編集（値の欄の操作は全部これ）。 */
+export type UpdateOp = Extract<Op, { op: "updateLayer" }>;

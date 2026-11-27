@@ -7,6 +7,7 @@ import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
 import { sequenceOps } from "./edit/layerOps";
+import { PropsPanel } from "./edit/PropsPanel";
 import type { Op } from "./edit/types";
 import "./styles.css";
 
@@ -245,6 +246,15 @@ export function App(): React.JSX.Element {
               <dt>長さ</dt>
               <dd>{selectedLayer.outFrame - selectedLayer.inFrame} コマ</dd>
             </dl>
+          ) : null}
+          {selectedLayer && comp ? (
+            <PropsPanel
+              layer={selectedLayer}
+              frame={frame}
+              onTrial={editor.trial}
+              onCommit={commit}
+              onSeek={(f) => void previewApi.seek(f)}
+            />
           ) : (
             <p className="muted">
               {selected.size > 1
