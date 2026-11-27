@@ -194,7 +194,12 @@ fn 取引はまとめて反映し既定を入れる() {
         doc["updatedAt"], "2026-11-26T00:00:00Z",
         "反映した時刻を書く"
     );
-    assert!(!dir.join(mv_ops::LOCK_FILE).exists(), "錠は外す");
+    // 錠は外す（OS の錠＝ほかの手がすぐかけられる）
+    let f = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(mv_ops::LOCK_FILE))
+        .unwrap();
+    assert!(f.try_lock().is_ok(), "錠は外す");
 }
 
 #[test]
@@ -309,7 +314,9 @@ fn 版が違えば断り反映中なら断る() {
         )
         .unwrap_err();
     assert_eq!(e.code, "conflict");
-    fs::write(dir.join(mv_ops::LOCK_FILE), b"").unwrap();
+    // ほかの手（別のアプリ・AI のコマンド）が錠をかけている
+    let held = fs::File::create(dir.join(mv_ops::LOCK_FILE)).unwrap();
+    held.try_lock().unwrap();
     let e = ops
         .call(
             "applyTransaction",
@@ -317,10 +324,7 @@ fn 版が違えば断り反映中なら断る() {
         )
         .unwrap_err();
     assert_eq!(e.code, "locked");
-    assert!(
-        dir.join(mv_ops::LOCK_FILE).exists(),
-        "ほかの操作の錠は消さない"
-    );
+    drop(held);
     assert_eq!(fs::read(dir.join("project.json")).unwrap(), before);
 }
 
@@ -622,24 +626,19 @@ fn 足す場所は既定で最前面() {
     assert_eq!(names, ["前", "見出し", "中", "背景", "奥"]);
 }
 
+/// MV-0009 決定5：落ちて残った錠のファイル（誰も OS の錠をかけていない）は、待たずに書ける。
 #[test]
-fn 古い錠は落ちた残りとして捨てる() {
+fn 落ちて残った錠のファイルがあっても待たずに書ける() {
     let (_r, dir) = sample();
     let mut ops = ops_allowing(vec![]);
     let lock = dir.join(mv_ops::LOCK_FILE);
-    let f = fs::File::create(&lock).unwrap();
-    f.set_modified(
-        std::time::SystemTime::now() - mv_ops::STALE_LOCK - std::time::Duration::from_secs(5),
-    )
-    .unwrap();
-    drop(f);
+    fs::write(&lock, b"").unwrap();
     let out = tx(
         &mut ops,
         &dir,
         json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "name": "x" } }]}),
     );
     assert_eq!(out.json["applied"], true);
-    assert!(!lock.exists());
 }
 
 #[test]
@@ -676,4 +675,115 @@ fn 許すフォルダは長い場所の印を外して保存する() {
         f.canonicalize().unwrap(),
         root.path().canonicalize().unwrap()
     );
+}
+
+fn name_of(dir: &Path) -> String {
+    let (doc, _) = read_doc(dir).unwrap();
+    doc["compositions"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == TITLE)
+        .unwrap()["name"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// MV-0009 決定1・3・4：画面と AI の取引を1本の履歴に並べ、新しい順に戻す。AI も undo・redo を呼べる。
+#[test]
+fn 画面と_ai_の取引を1本の履歴で戻してやり直す() {
+    let (_r, dir) = sample();
+    let settings = ops_allowing(vec![]).settings.clone();
+    let mut ai = Ops::new(settings.clone(), None);
+    let mut user = Ops::for_user(settings);
+    let first = name_of(&dir);
+    let set = |name: &str| json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "name": name } }]});
+    assert_eq!(
+        tx(&mut ai, &dir, set("AI の名前")).json["history"]["undo"],
+        "AI：レイヤーを直す"
+    );
+    let out = tx(&mut user, &dir, set("画面の名前"));
+    assert_eq!(out.json["history"]["undo"], "画面：レイヤーを直す");
+    let undo = |o: &mut Ops| o.call("undo", &json!({ "project": p(&dir) }));
+    let redo = |o: &mut Ops| o.call("redo", &json!({ "project": p(&dir) }));
+    // 画面の取引を戻す（AI の口からでも同じ1本）
+    let u = undo(&mut ai).unwrap();
+    assert_eq!(u.json["undone"], "画面：レイヤーを直す");
+    assert_eq!(name_of(&dir), "AI の名前");
+    assert_eq!(u.json["revision"], json!(read_doc(&dir).unwrap().1));
+    // 続けて AI の取引も戻す（画面の口から）
+    assert_eq!(
+        undo(&mut user).unwrap().json["undone"],
+        "AI：レイヤーを直す"
+    );
+    assert_eq!(name_of(&dir), first);
+    assert_eq!(undo(&mut user).unwrap_err().code, "nothingToUndo");
+    // やり直す
+    assert_eq!(
+        redo(&mut user).unwrap().json["redone"],
+        "AI：レイヤーを直す"
+    );
+    assert_eq!(name_of(&dir), "AI の名前");
+    let i = ai.call("inspect", &json!({ "project": p(&dir) })).unwrap();
+    assert_eq!(
+        i.json["history"],
+        json!({ "undo": "AI：レイヤーを直す", "redo": "画面：レイヤーを直す" })
+    );
+    // 戻したあとに新しい取引を反映すると、やり直しの分は消える
+    tx(&mut user, &dir, set("新しい名前"));
+    assert_eq!(redo(&mut user).unwrap_err().code, "nothingToRedo");
+    // 戻したものはファイルにも残る（閉じても戻せる＝history/）
+    assert!(dir.join("history").join("index.json").exists());
+}
+
+/// MV-0009 決定3：履歴の外で動画が変わっていたら、上書きせずに断る。試しと断られた取引は積まない。
+#[test]
+fn 履歴の外の変更は上書きせず_試しと断られた取引は積まない() {
+    let (_r, dir) = sample();
+    let mut ai = ops_allowing(vec![]);
+    let set = |name: &str| json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "name": name } }]});
+    tx(&mut ai, &dir, set("一"));
+    // 試すだけ・検査で断られた取引は積まない
+    let mut dry = set("試し");
+    dry["dryRun"] = json!(true);
+    tx(&mut ai, &dir, dry);
+    let bad = tx(
+        &mut ai,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "outFrame": -5 } }]}),
+    );
+    assert!(bad.is_error);
+    assert_eq!(mv_ops::history::load_index(&dir).entries.len(), 1);
+    // 手で project.json を直した
+    let text = fs::read_to_string(dir.join("project.json"))
+        .unwrap()
+        .replace("\"一\"", "\"手で直した\"");
+    fs::write(dir.join("project.json"), text).unwrap();
+    let e = ai.call("undo", &json!({ "project": p(&dir) })).unwrap_err();
+    assert_eq!(e.code, "historyMismatch");
+    assert_eq!(name_of(&dir), "手で直した", "上書きしない");
+}
+
+/// MV-0009 決定5：project.json が壊れたら、履歴の最後の中身から開き直せる。
+#[test]
+fn 壊れた中身は履歴の最後から開き直せる() {
+    let (_r, dir) = sample();
+    let mut ai = ops_allowing(vec![]);
+    assert_eq!(
+        mv_ops::recover_from_history(&dir).unwrap_err().code,
+        "nothingToRecover"
+    );
+    tx(
+        &mut ai,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "name": "最後" } }]}),
+    );
+    fs::write(dir.join("project.json"), b"{ broken").unwrap();
+    assert!(read_doc(&dir).is_err());
+    let rev = mv_ops::recover_from_history(&dir).unwrap();
+    assert_eq!(read_doc(&dir).unwrap().1, rev);
+    assert_eq!(name_of(&dir), "最後");
+    // 開き直したあとも、そのまま戻せる（履歴の版と同じ中身を書く）
+    assert!(ai.call("undo", &json!({ "project": p(&dir) })).is_ok());
 }

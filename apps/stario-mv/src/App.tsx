@@ -65,7 +65,10 @@ export function App(): React.JSX.Element {
     [editCommit],
   );
 
+  // 開こうとした動画のフォルダ（開けなかったとき、履歴から開き直すため）
+  const [triedDir, setTriedDir] = useState<string | null>(null);
   const open = useCallback(async (dir: string) => {
+    setTriedDir(dir);
     try {
       const s = await previewApi.openProject(dir);
       setProject(s);
@@ -134,13 +137,16 @@ export function App(): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (!comp) return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT") && e.key !== " ") return;
+      // ⚠️ 文字を打っている欄では、欄の取り消し（Ctrl+Z）などを奪わない
+      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA") && e.key !== " ") return;
       const edit = editKey(e);
       if (edit) {
         if (!editComp) return;
         e.preventDefault();
         if (edit === "selectAll") setSelectedIds(editComp.layers.map((l) => l.id));
         else if (edit === "snap") setSnapping((v) => !v);
+        else if (edit === "undo") void editor.undo();
+        else if (edit === "redo") void editor.redo();
         else commit(editOps(edit, editComp, selected, frame));
         return;
       }
@@ -162,7 +168,7 @@ export function App(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [comp, togglePlay, editComp, selected, frame, commit]);
+  }, [comp, togglePlay, editComp, selected, frame, commit, editor]);
 
   const pick = async (): Promise<void> => {
     const dir = await previewApi.pickProjectFolder();
@@ -245,9 +251,23 @@ export function App(): React.JSX.Element {
             <p className="hint">「動画を開く…」で、project.json のあるフォルダを選んでください。</p>
           )}
           {openError && (
-            <p className="notice" role="alert">
-              開けませんでした：{openError}
-            </p>
+            <div className="notice" role="alert">
+              <p>開けませんでした：{openError}</p>
+              {/* 落ちて壊れたとき（MV-0009 決定5）＝押すまで何も書かない */}
+              {triedDir && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void editApi.recover(triedDir).then(
+                      () => open(triedDir),
+                      (e: unknown) => setOpenError(String(e)),
+                    );
+                  }}
+                >
+                  履歴の最後の状態から開く
+                </button>
+              )}
+            </div>
           )}
           {error && (
             <p className="notice" role="alert">
@@ -318,6 +338,22 @@ export function App(): React.JSX.Element {
       />
       <section className="tl-pane" aria-label="タイムライン">
         <div className="bar tl-tools">
+          <button
+            type="button"
+            disabled={!editor.history.undo}
+            onClick={() => void editor.undo()}
+            title={editor.history.undo ? `元に戻す（Ctrl+Z）：${editor.history.undo}` : "元に戻せる操作はありません"}
+          >
+            元に戻す
+          </button>
+          <button
+            type="button"
+            disabled={!editor.history.redo}
+            onClick={() => void editor.redo()}
+            title={editor.history.redo ? `やり直す（Ctrl+Shift+Z）：${editor.history.redo}` : "やり直せる操作はありません"}
+          >
+            やり直す
+          </button>
           <button
             type="button"
             aria-pressed={snapping}

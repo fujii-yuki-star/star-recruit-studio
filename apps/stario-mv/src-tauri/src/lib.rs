@@ -191,6 +191,53 @@ fn edit_eval(layer: Value, frame: i64) -> Value {
     edit::eval_values(&layer, frame)
 }
 
+/// 元に戻す（MV-0009 決定6）。戻したらプレビューをすぐ読み直す。
+#[tauri::command]
+async fn edit_undo(
+    dir: String,
+    editor: tauri::State<'_, Editor>,
+    tx: tauri::State<'_, PreviewTx>,
+) -> Result<Value, String> {
+    history_step(&dir, true, &editor, &tx)
+}
+
+/// やり直す（MV-0009 決定6）。
+#[tauri::command]
+async fn edit_redo(
+    dir: String,
+    editor: tauri::State<'_, Editor>,
+    tx: tauri::State<'_, PreviewTx>,
+) -> Result<Value, String> {
+    history_step(&dir, false, &editor, &tx)
+}
+
+fn history_step(dir: &str, undo: bool, editor: &Editor, tx: &PreviewTx) -> Result<Value, String> {
+    let r = {
+        let mut engine = editor
+            .0
+            .lock()
+            .map_err(|_| "編集の口が止まっています。アプリを起動し直してください。".to_string())?;
+        edit::step(&mut *engine, Path::new(dir), undo, &mut std::thread::sleep)
+    };
+    if r.is_ok() {
+        tx.send(Cmd::Reload)?;
+    }
+    r
+}
+
+/// 戻せる取引・やり直せる取引の名前（`{ undo, redo }`・無ければ null）。
+#[tauri::command]
+fn edit_history(dir: String) -> Value {
+    let (undo, redo) = mv_ops::history::status(Path::new(&dir));
+    json!({ "undo": undo, "redo": redo })
+}
+
+/// `project.json` が読めないとき、履歴の最後の中身から開き直す（MV-0009 決定5）。押すまで何も書かない。
+#[tauri::command]
+async fn edit_recover(dir: String) -> Result<String, String> {
+    mv_ops::recover_from_history(Path::new(&dir)).map_err(|e| e.message)
+}
+
 /// 掴んで動かしている途中の編集を、プレビューに試しとして渡す（保存しない）。`ops` が無ければやめる。
 #[tauri::command]
 fn edit_trial(ops: Option<Vec<Value>>, tx: tauri::State<PreviewTx>) -> Result<(), String> {
@@ -294,7 +341,11 @@ pub fn run() {
             edit_trial,
             edit_eval,
             preview_bounds,
-            pick_asset_files
+            pick_asset_files,
+            edit_undo,
+            edit_redo,
+            edit_history,
+            edit_recover
         ])
         .run(tauri::generate_context!())
         .expect("すたりおMV を起動できませんでした");

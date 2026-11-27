@@ -17,14 +17,42 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(2);
 /// 錠を見直す間隔。
 pub const LOCK_POLL: Duration = Duration::from_millis(100);
 
-/// 取引を送る相手（検査で差し替えられるように）。
+/// 操作を送る相手（検査で差し替えられるように）。
 pub trait Transact {
-    fn transact(&mut self, args: &Value) -> Result<Output, OpError>;
+    fn call_op(&mut self, name: &str, args: &Value) -> Result<Output, OpError>;
 }
 
 impl Transact for Ops {
-    fn transact(&mut self, args: &Value) -> Result<Output, OpError> {
-        self.call("applyTransaction", args)
+    fn call_op(&mut self, name: &str, args: &Value) -> Result<Output, OpError> {
+        self.call(name, args)
+    }
+}
+
+/// 元に戻す・やり直す（MV-0009 決定3・6）。取引と同じく、錠がかかっていれば最大 [`LOCK_WAIT`] 待つ。
+pub fn step(
+    engine: &mut impl Transact,
+    dir: &Path,
+    undo: bool,
+    sleep: &mut impl FnMut(Duration),
+) -> Result<Value, String> {
+    let args = json!({ "project": dir.display().to_string() });
+    let name = if undo { "undo" } else { "redo" };
+    let mut waited = Duration::ZERO;
+    loop {
+        match engine.call_op(name, &args) {
+            Ok(out) => return Ok(out.json),
+            Err(e) if e.code == "locked" && waited < LOCK_WAIT => {
+                sleep(LOCK_POLL);
+                waited += LOCK_POLL;
+            }
+            Err(e) if e.code == "locked" => {
+                return Err(
+                    "AI がこの動画に反映している途中です。少し待ってから、もう一度押してください。"
+                        .into(),
+                )
+            }
+            Err(e) => return Err(e.message),
+        }
     }
 }
 
@@ -45,7 +73,7 @@ pub fn apply(
         if let Some(b) = &base {
             args["baseRevision"] = json!(b);
         }
-        match engine.transact(&args) {
+        match engine.call_op("applyTransaction", &args) {
             Ok(out) if out.is_error => return Err(refusal(&out.json)),
             Ok(mut out) => {
                 out.json["reapplied"] = json!(reapplied);
@@ -151,8 +179,10 @@ mod tests {
     }
 
     impl Transact for Fake {
-        fn transact(&mut self, args: &Value) -> Result<Output, OpError> {
-            self.calls.push(args.clone());
+        fn call_op(&mut self, name: &str, args: &Value) -> Result<Output, OpError> {
+            let mut a = args.clone();
+            a["$op"] = json!(name);
+            self.calls.push(a);
             self.replies.borrow_mut().pop().expect("答えが足りない")
         }
     }
@@ -192,6 +222,31 @@ mod tests {
         );
         assert_eq!(f.calls[1]["ops"], ops(), "同じ操作");
         assert_eq!(f.calls[1]["project"], "D");
+    }
+
+    #[test]
+    fn 戻すとやり直すは錠を待ち_断りは文で返す() {
+        let mut f = Fake::new(vec![
+            err("locked"),
+            ok(json!({ "applied": true, "undone": "画面：x" })),
+        ]);
+        let mut slept = Duration::ZERO;
+        let r = step(&mut f, Path::new("D"), true, &mut |d| slept += d).unwrap();
+        assert_eq!(r["undone"], "画面：x");
+        assert_eq!(slept, LOCK_POLL);
+        assert_eq!(f.calls[0]["$op"], "undo");
+        assert_eq!(f.calls[0]["project"], "D");
+        let mut f = Fake::new(vec![err("nothingToRedo")]);
+        assert_eq!(
+            step(&mut f, Path::new("D"), false, &mut |_| {}).unwrap_err(),
+            "nothingToRedo の文"
+        );
+        assert_eq!(f.calls[0]["$op"], "redo");
+        let n = (LOCK_WAIT.as_millis() / LOCK_POLL.as_millis()) as usize;
+        let mut f = Fake::new((0..=n).map(|_| err("locked")).collect());
+        assert!(step(&mut f, Path::new("D"), true, &mut |_| {})
+            .unwrap_err()
+            .contains("反映している途中"));
     }
 
     #[test]

@@ -5,7 +5,7 @@
     {
       "name": "inspect",
       "title": "中身を見る",
-      "description": "動画（すたりおMV のプロジェクト）の中身を見る。既定は要約（版＝revision・コンポジションとレイヤーの一覧・検査の問題の数）。compositionId か layerId を渡すと、その JSON 全体を返す。full: true でプロジェクトの JSON 全体。編集の前に呼び、返った revision を applyTransaction の baseRevision に入れると、その間の他の変更と衝突しない。レイヤーの並びは先頭が最前面。",
+      "description": "動画（すたりおMV のプロジェクト）の中身を見る。既定は要約（版＝revision・コンポジションとレイヤーの一覧・検査の問題の数）。compositionId か layerId を渡すと、その JSON 全体を返す。full: true でプロジェクトの JSON 全体。編集の前に呼び、返った revision を applyTransaction の baseRevision に入れると、その間の他の変更と衝突しない。レイヤーの並びは先頭が最前面。要約には history（元に戻せる取引・やり直せる取引の名前）も入る。",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -215,6 +215,30 @@
               }
             ]
           }
+        }
+      }
+    },
+    {
+      "name": "undo",
+      "title": "元に戻す",
+      "description": "いちばん新しい取引を元に戻す（画面と AI の取引を並べた1本の履歴＝MV-0009）。戻すのは取引1つ分。履歴は動画のフォルダの history/ に最大 200 回分。履歴のあとに別の道（手で project.json を直したなど）で動画が変わっていたら戻さずに断る（historyMismatch）。戻せるものが無ければ nothingToUndo。何を戻せるかは inspect の history に出る。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "redo",
+      "title": "やり直す",
+      "description": "元に戻した取引をやり直す（undo の逆）。戻したあとに新しい取引を反映していたら、やり直しの分は消えている（nothingToRedo）。履歴のあとに別の道で動画が変わっていたら断る（historyMismatch）。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project": { "type": "string" }
         }
       }
     },

@@ -4,6 +4,18 @@ import { editKey } from "./editKeys";
 const k = (key: string, m: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
   editKey({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...m });
 
+describe("元に戻す・やり直すのキー（MV-0009 決定6）", () => {
+  it("Ctrl+Z は戻す・Ctrl+Shift+Z と Ctrl+Y はやり直す（Alt を伴えば何もしない）", () => {
+    expect(k("z", { ctrlKey: true })).toBe("undo");
+    expect(k("Z", { ctrlKey: true, shiftKey: true })).toBe("redo");
+    expect(k("y", { ctrlKey: true })).toBe("redo");
+    expect(k("z", { metaKey: true })).toBe("undo");
+    expect(k("z", { ctrlKey: true, altKey: true })).toBeNull();
+    expect(k("y", { ctrlKey: true, shiftKey: true })).toBeNull();
+    expect(k("z")).toBeNull();
+  });
+});
+
 describe("編集のキー（MV-0008 決定4・AE の型）", () => {
   it("[ ] は動かす・Alt+[ ] は切る・Ctrl+] [ は重なりの順", () => {
     expect(k("[")).toBe("moveIn");

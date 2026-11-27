@@ -4,6 +4,7 @@
 //! 操作の一覧の正典は `docs/stario_mv_docs/schemas/mv-operations.json`（[`CATALOG_JSON`]）。
 //! ⚠️ 書き換えは必ず取引（[`tx`]）で＝当てたあとに形と中身の検査を通ったときだけ保存する（ADR-0074 決定3）。
 
+pub mod history;
 pub mod import;
 pub mod mcp;
 pub mod settings;
@@ -21,15 +22,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 /// 操作の一覧（正典）。γ の資料からそのまま埋め込む＝写しを作らない。
 pub const CATALOG_JSON: &str =
     include_str!("../../../../../docs/stario_mv_docs/schemas/mv-operations.json");
-/// 反映中の目印のファイル。
+/// 反映中の錠のファイル（OS のファイルの錠をかける＝持ち主が落ちれば OS がすぐ外す・MV-0009 決定5）。
+/// ⚠️ ファイルが残っていても、誰も錠をかけていなければ書ける（ファイルは消さない＝消すと別の手が別のファイルに錠をかけうる）。
 pub const LOCK_FILE: &str = "project.json.lock";
-/// これより古い錠は、落ちた残りとみなして捨てる。
-pub const STALE_LOCK: Duration = Duration::from_secs(600);
 /// 1コマの絵の長辺の既定の上限（AI に渡す絵を重くしすぎない）。
 pub const DEFAULT_MAX_SIZE: u32 = 960;
 
@@ -68,6 +68,8 @@ pub const HANDLED: &[&str] = &[
     "renderFrame",
     "newIds",
     "applyTransaction",
+    "undo",
+    "redo",
     "createProject",
     "exportVideo",
 ];
@@ -183,6 +185,8 @@ impl Ops {
             "renderFrame" => self.render_frame(args),
             "newIds" => new_ids(args),
             "applyTransaction" => self.apply_transaction(args),
+            "undo" => self.step(args, history::Step::Undo),
+            "redo" => self.step(args, history::Step::Redo),
             "createProject" => self.create_project(args),
             "exportVideo" => self.export_video(args),
             _ => Err(OpError::new(
@@ -271,6 +275,7 @@ impl Ops {
             })).collect::<Vec<_>>(),
             "compositions": comps,
             "issueCount": issues.len(),
+            "history": history_json(&dir),
             "note": "レイヤーの並びは先頭が最前面。値の形はプロジェクトの正典 schema（mv-project.schema.json）のとおり。",
         })))
     }
@@ -471,7 +476,21 @@ impl Ops {
                 return Err(OpError::new("io", format!("保存できませんでした（{e}）。")));
             }
             out["applied"] = json!(true);
-            out["revision"] = json!(read_doc(&dir)?.1);
+            let rev = read_doc(&dir)?.1;
+            out["revision"] = json!(rev);
+            // 1つの取引＝1つの履歴（MV-0009 決定1）。⚠️ 積めなくても反映は取り消さない（戻せなくなるだけ）＝知らせる
+            let saved = serde_json::to_value(p).unwrap_or(Value::Null);
+            let label = history::label_of(&ops, self.user_caller);
+            let actor = if self.user_caller { "user" } else { "ai" };
+            if let Err(e) =
+                history::record(&dir, &before, &saved, &rev, actor, &label, &now_rfc3339())
+            {
+                warnings.push(format!(
+                    "履歴に残せませんでした（この取引は元に戻せません）：{e}"
+                ));
+                out["warnings"] = json!(warnings);
+            }
+            out["history"] = history_json(&dir);
         }
         let mut image = None;
         if let (Some(r), Some(p)) = (args.get("render"), &project) {
@@ -501,6 +520,58 @@ impl Ops {
             image,
             is_error: !ok && !dry,
         })
+    }
+
+    /// 元に戻す・やり直す（MV-0009 決定3）。取引と同じ錠と検査を通る。それ自体は履歴に積まない。
+    fn step(&mut self, args: &Value, step: history::Step) -> Result<Output, OpError> {
+        let dir = self.project_dir(args)?;
+        let _lock = Lock::take(&dir)?;
+        let (_, revision) = read_doc(&dir)?;
+        let (entry, mut doc) = history::target(&dir, step, &revision).map_err(|e| match e {
+            history::HistoryError::Nothing => OpError::new(
+                if step == history::Step::Undo { "nothingToUndo" } else { "nothingToRedo" },
+                if step == history::Step::Undo {
+                    "元に戻せる取引がありません。"
+                } else {
+                    "やり直せる取引がありません（戻したあとに新しい取引を反映すると、やり直しの分は消えます）。"
+                },
+            ),
+            history::HistoryError::Mismatch => OpError::new(
+                "historyMismatch",
+                "履歴のあとに、別の道（手で project.json を直したなど）で動画が変わっています。上書きしないよう、戻していません。",
+            ),
+            history::HistoryError::Broken(m) => OpError::new(
+                "historyBroken",
+                format!("履歴のファイルが読めません（{m}）。この取引は戻せません。"),
+            ),
+        })?;
+        doc["updatedAt"] = json!(now_rfc3339());
+        let (project, issues) = check_doc(&doc);
+        let Some(p) = project.filter(|_| issues.is_empty()) else {
+            return Err(OpError::new(
+                "historyBroken",
+                format!(
+                    "履歴の中身が検査を通りません（{}）。戻していません。",
+                    json!(issues)
+                ),
+            ));
+        };
+        mv_core::io::save_project(&dir, &p)
+            .map_err(|e| OpError::new("io", format!("保存できませんでした（{e}）。")))?;
+        let rev = read_doc(&dir)?.1;
+        history::commit_step(&dir, step, &rev)
+            .map_err(|e| OpError::new("io", format!("履歴の位置を書けませんでした（{e}）。")))?;
+        let key = if step == history::Step::Undo {
+            "undone"
+        } else {
+            "redone"
+        };
+        Ok(Output::ok(json!({
+            "applied": true,
+            "revision": rev,
+            key: entry.label,
+            "history": history_json(&dir),
+        })))
     }
 
     fn create_project(&mut self, args: &Value) -> Result<Output, OpError> {
@@ -598,6 +669,33 @@ fn new_ids(args: &Value) -> Result<Output, OpError> {
     let n = args.get("count").and_then(Value::as_u64).unwrap_or(1);
     let ids: Vec<String> = (0..n).map(|_| new_id(kind)).collect();
     Ok(Output::ok(json!({ "ids": ids })))
+}
+
+/// 戻せる取引・やり直せる取引の名前（無ければ null）。
+fn history_json(dir: &Path) -> Value {
+    let (undo, redo) = history::status(dir);
+    json!({ "undo": undo, "redo": redo })
+}
+
+/// 履歴の最後の中身から開き直す（`project.json` が読めないとき＝MV-0009 決定5）。書いたら版を返す。
+pub fn recover_from_history(dir: &Path) -> Result<String, OpError> {
+    let _lock = Lock::take(dir)?;
+    let doc = history::latest(dir).ok_or_else(|| {
+        OpError::new(
+            "nothingToRecover",
+            "履歴が無いので、開き直せる中身がありません。",
+        )
+    })?;
+    let (project, issues) = check_doc(&doc);
+    let Some(p) = project.filter(|_| issues.is_empty()) else {
+        return Err(OpError::new(
+            "historyBroken",
+            format!("履歴の最後の中身も検査を通りません（{}）。", json!(issues)),
+        ));
+    };
+    mv_core::io::save_project(dir, &p)
+        .map_err(|e| OpError::new("io", format!("保存できませんでした（{e}）。")))?;
+    Ok(read_doc(dir)?.1)
 }
 
 /// 動画のフォルダから JSON と版（中身の SHA-256）を読む。
@@ -724,43 +822,34 @@ fn write_file(p: &Path, bytes: &[u8]) -> Result<(), OpError> {
 }
 
 /// 反映中の錠（同時に2つの書き込みが走らないように＝待たずに断る）。
-struct Lock(PathBuf);
+/// ⚠️ OS のファイルの錠（`File::try_lock`）＝持ち主のアプリや AI のコマンドが落ちても、OS がすぐ外す（MV-0009 決定5）。
+struct Lock(fs::File);
 
 impl Lock {
     fn take(dir: &Path) -> Result<Self, OpError> {
-        let p = dir.join(LOCK_FILE);
-        for _ in 0..2 {
-            match fs::OpenOptions::new().write(true).create_new(true).open(&p) {
-                Ok(_) => return Ok(Self(p)),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = fs::metadata(&p)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|t| SystemTime::now().duration_since(t).ok())
-                        .is_some_and(|age| age > STALE_LOCK);
-                    if !stale {
-                        break;
-                    }
-                    let _ = fs::remove_file(&p);
-                }
-                Err(e) => {
-                    return Err(OpError::new(
-                        "io",
-                        format!("錠のファイルを作れませんでした（{e}）。"),
-                    ))
-                }
-            }
+        let f = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(LOCK_FILE))
+            .map_err(|e| OpError::new("io", format!("錠のファイルを開けませんでした（{e}）。")))?;
+        match f.try_lock() {
+            Ok(()) => Ok(Self(f)),
+            Err(fs::TryLockError::WouldBlock) => Err(OpError::new(
+                "locked",
+                "ほかの操作がこの動画に反映している途中です。少し待ってから inspect で読み直し、送り直してください。",
+            )),
+            Err(fs::TryLockError::Error(e)) => Err(OpError::new(
+                "io",
+                format!("錠をかけられませんでした（{e}）。"),
+            )),
         }
-        Err(OpError::new(
-            "locked",
-            "ほかの操作がこの動画に反映している途中です。少し待ってから inspect で読み直し、送り直してください。",
-        ))
     }
 }
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        let _ = self.0.unlock();
     }
 }
 
