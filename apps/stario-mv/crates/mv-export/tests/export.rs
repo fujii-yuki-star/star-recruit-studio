@@ -501,3 +501,103 @@ fn 入れ子の中の音も外の時刻で混ぜる() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// 0 をまたぐ回数から、その区間の音の高さ（Hz）を求める（左の音）。
+fn pitch(pcm: &[f32], rate: f64, from: f64, to: f64) -> f64 {
+    let s: Vec<f32> = pcm[(from * rate) as usize * 2..(to * rate) as usize * 2]
+        .iter()
+        .step_by(2)
+        .copied()
+        .collect();
+    let crossings = s
+        .windows(2)
+        .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+        .count();
+    crossings as f64 / 2.0 / (to - from)
+}
+
+fn remap_keys(keys: &[(i64, f64)]) -> Animatable {
+    Animatable {
+        keyframes: Some(
+            keys.iter()
+                .map(|&(frame, v)| Keyframe {
+                    frame,
+                    value: AnimValue::Number(v),
+                    interpolation: Interpolation::Linear,
+                    ease_out: None,
+                    ease_in: None,
+                    spatial_out: None,
+                    spatial_in: None,
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    }
+}
+
+/// MV-0012 決定2：タイムリマップの音は、リマップの秒の音（遅くすれば低く・逆向きも鳴る・素材の外は無音）。プレビューと書き出しは同じ。
+#[test]
+fn タイムリマップの音は素材の秒の音で高さも変わる() {
+    let dir = tmpdir();
+    let mut p = audio_project(&dir);
+    let id = p.main_composition_id.clone();
+    // 外の 30〜60 フレーム（1〜2 秒）で素材の 1〜1.5 秒＝半分の速さ＝1000 Hz → 500 Hz
+    p.compositions[0].layers.last_mut().unwrap().time_remap =
+        Some(remap_keys(&[(30, 1.0), (60, 1.5)]));
+    let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 48000)
+        .unwrap()
+        .expect("音がある");
+    let hz = pitch(&pcm, 48000.0, 1.1, 1.9);
+    assert!((hz - 500.0).abs() < 10.0, "半分の速さ＝半分の高さ: {hz}");
+    assert!(
+        pitch(&pcm, 48000.0, 0.1, 0.9) < 1.0,
+        "見える範囲の前は鳴らない"
+    );
+    // 2 倍の速さ・逆向き（素材の 4 → 2 秒）＝2000 Hz
+    p.compositions[0].layers.last_mut().unwrap().time_remap =
+        Some(remap_keys(&[(30, 4.0), (60, 2.0)]));
+    let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 48000)
+        .unwrap()
+        .unwrap();
+    let hz = pitch(&pcm, 48000.0, 1.1, 1.9);
+    assert!((hz - 2000.0).abs() < 20.0, "逆向き 2 倍: {hz}");
+    // 素材の外（10 秒＝素材は 5 秒）は無音
+    p.compositions[0].layers.last_mut().unwrap().time_remap = Some(Animatable::number(10.0));
+    let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 48000)
+        .unwrap()
+        .unwrap();
+    let peak = pcm.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(peak < 1e-4, "素材の外は無音: {peak}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// MV-0012 決定2：入れ子のタイムリマップは中の音にも効く（中の時刻で混ぜた音を外の時刻へ並べ直す）。
+#[test]
+fn 入れ子のタイムリマップは中の音にも効く() {
+    let dir = tmpdir();
+    let mut p = audio_project(&dir);
+    let audio_layer = p.compositions[0].layers.pop().unwrap();
+    let mut inner = p.compositions[0].clone();
+    inner.id = new_id(IdKind::Composition);
+    inner.layers = vec![audio_layer];
+    let mut pre = p.compositions[0].layers[1].clone();
+    pre.id = new_id(IdKind::Layer);
+    pre.layer_type = LayerType::Precomp;
+    pre.solid = None;
+    pre.composition_id = Some(inner.id.clone());
+    pre.in_frame = 0;
+    pre.out_frame = 90;
+    // 外の 0〜90 フレーム（0〜3 秒）で中の 1〜2.5 秒（中の音は 1〜2 秒）＝半分の速さ → 外の 0〜2 秒で 500 Hz
+    pre.time_remap = Some(remap_keys(&[(0, 1.0), (90, 2.5)]));
+    p.compositions[0].layers.push(pre);
+    p.compositions.push(inner);
+    let id = p.main_composition_id.clone();
+    let pcm = mv_export::mix_pcm(&p, &id, &dir, &ffmpeg(), 48000)
+        .unwrap()
+        .unwrap();
+    let hz = pitch(&pcm, 48000.0, 0.2, 1.8);
+    assert!((hz - 500.0).abs() < 10.0, "中の音も半分の高さ: {hz}");
+    // 中の音が終わったあと（中の 2 秒より後＝外の 2 秒より後）は無音
+    assert!(pitch(&pcm, 48000.0, 2.2, 2.9) < 1.0);
+    std::fs::remove_dir_all(&dir).ok();
+}
