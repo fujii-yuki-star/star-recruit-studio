@@ -788,6 +788,10 @@ fn 壊れた中身は履歴の最後から開き直せる() {
         &dir,
         json!({ "ops": [{ "op": "updateLayer", "layerId": TITLE, "patch": { "name": "最後" } }]}),
     );
+    // 戻してやり直す（秒をまたぐ＝今の中身は履歴に残した中身と時刻が違う＝開き直すと版が変わる）
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    ai.call("undo", &json!({ "project": p(&dir) })).unwrap();
+    ai.call("redo", &json!({ "project": p(&dir) })).unwrap();
     fs::write(dir.join("project.json"), b"{ broken").unwrap();
     assert!(read_doc(&dir).is_err());
     let rev = mv_ops::recover_from_history(&dir).unwrap();
