@@ -408,3 +408,58 @@ fn 親の親まで変形を掛ける() {
         "親の大きさも掛かる"
     );
 }
+
+/// MV-0012 決定1：タイムリマップは受け付ける・素材の秒はリマップの値（無ければ startFrame からの進み）。
+#[test]
+fn タイムリマップは通り_素材の秒はその値() {
+    let mut p = minimal();
+    let asset_id = new_id(IdKind::Asset);
+    p.assets.push(Asset {
+        id: asset_id.clone(),
+        kind: AssetKind::Video,
+        name: "映像".into(),
+        source: AssetSource::Copied {
+            path: "assets/v.mp4".into(),
+        },
+        sha256: None,
+        meta: None,
+    });
+    let l = solid_layer(&mut p);
+    l.layer_type = LayerType::Video;
+    l.solid = None;
+    l.asset_id = Some(asset_id);
+    l.start_frame = 6;
+    let fps = {
+        let c = &p.compositions[0];
+        f64::from(c.fps.num) / f64::from(c.fps.den)
+    };
+    let c = &p.compositions[0];
+    let l = c
+        .layers
+        .iter()
+        .find(|l| l.layer_type == LayerType::Video)
+        .unwrap()
+        .clone();
+    let s = mv_core::eval::source_sec(c, &l, 6.0 + fps).unwrap();
+    assert!(
+        (s - 1.0).abs() < 1e-9,
+        "リマップなし＝startFrame から 1 秒: {s}"
+    );
+    solid_layer_video(&mut p).time_remap = Some(Animatable::number(2.5));
+    assert_eq!(codes(&p), vec![], "タイムリマップは γ0.2 で描ける");
+    let c = &p.compositions[0];
+    let l = c
+        .layers
+        .iter()
+        .find(|l| l.layer_type == LayerType::Video)
+        .unwrap();
+    assert_eq!(mv_core::eval::source_sec(c, l, 6.0 + fps).unwrap(), 2.5);
+}
+
+fn solid_layer_video(p: &mut Project) -> &mut Layer {
+    p.compositions[0]
+        .layers
+        .iter_mut()
+        .find(|l| l.layer_type == LayerType::Video)
+        .unwrap()
+}

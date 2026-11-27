@@ -17,6 +17,9 @@ import {
   setParentOp,
   parentCandidates,
   precomposeOp,
+  setSpeedOp,
+  speedOf,
+  toggleTimeRemapOps,
   trimOutOps,
   trimToPlayheadOps,
 } from "./layerOps";
@@ -173,6 +176,49 @@ describe("プリコンポーズ（MV-0011 決定5）", () => {
     expect(precomposeOp(c, set("C", "A", "L"), "入れ子")).toEqual({ op: "precompose", layerIds: ["A", "C"], name: "入れ子" });
     expect(precomposeOp(c, set("L"), "入れ子")).toBeNull();
     expect(precomposeOp(c, set(), "入れ子")).toBeNull();
+  });
+});
+
+describe("速度とタイムリマップ（MV-0012）", () => {
+  const key = (frame: number, value: number, interpolation: "linear" | "hold" | "bezier" = "linear") => ({
+    frame,
+    value,
+    interpolation,
+  });
+  it("速度＝無ければ 100・直線の2つなら傾き・それ以外は細かいリマップ（null）", () => {
+    const v = layer("V", 0, 60, { type: "video" });
+    expect(speedOf(v, 30)).toBe(100);
+    expect(speedOf({ ...v, timeRemap: { keyframes: [key(0, 0), key(30, 2)] } }, 30)).toBe(200);
+    expect(speedOf({ ...v, timeRemap: { keyframes: [key(10, 3), key(70, 1)] } }, 30)).toBe(-100);
+    expect(speedOf({ ...v, timeRemap: { keyframes: [key(0, 0), key(30, 2)] } }, 60)).toBe(400);
+    expect(speedOf({ ...v, timeRemap: { value: 1 } }, 30)).toBeNull();
+    expect(speedOf({ ...v, timeRemap: { keyframes: [key(0, 0), key(10, 1), key(20, 1)] } }, 30)).toBeNull();
+    expect(speedOf({ ...v, timeRemap: { keyframes: [key(0, 0, "bezier"), key(30, 2)] } }, 30)).toBeNull();
+    expect(
+      speedOf({ ...v, timeRemap: { keyframes: [key(0, 0), key(30, 2)], expression: { language: "js", source: "1" } } }, 30),
+    ).toBeNull();
+  });
+  it("速度の操作は時刻を持つレイヤーだけ・0 と錠は作らない", () => {
+    const v = layer("V", 0, 60, { type: "video" });
+    expect(setSpeedOp(v, 50)).toEqual({ op: "setSpeed", layerId: "V", percent: 50 });
+    expect(setSpeedOp(layer("A", 0, 60, { type: "audio" }), -100)).toEqual({ op: "setSpeed", layerId: "A", percent: -100 });
+    expect(setSpeedOp(layer("P", 0, 60, { type: "precomp" }), 200)).not.toBeNull();
+    expect(setSpeedOp(v, 0)).toBeNull();
+    expect(setSpeedOp(v, Number.NaN)).toBeNull();
+    expect(setSpeedOp(layer("S", 0, 60), 50)).toBeNull();
+    expect(setSpeedOp({ ...v, locked: true }, 50)).toBeNull();
+  });
+  it("Ctrl+Alt+T＝選んだ時刻を持つレイヤーごとに今と逆へ（錠・単色は除く）", () => {
+    const c = comp([
+      layer("V", 0, 60, { type: "video" }),
+      layer("R", 0, 60, { type: "audio", timeRemap: { value: 1 } }),
+      layer("S", 0, 60),
+      layer("L", 0, 60, { type: "precomp", locked: true }),
+    ]);
+    expect(toggleTimeRemapOps(c, set("V", "R", "S", "L"))).toEqual([
+      { op: "enableTimeRemap", layerId: "V", enabled: true },
+      { op: "enableTimeRemap", layerId: "R", enabled: false },
+    ]);
   });
 });
 

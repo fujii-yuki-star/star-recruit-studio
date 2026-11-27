@@ -253,6 +253,18 @@ pub fn transform_at(t: &Transform, frame: f64) -> Result<TransformAt, EvalError>
     })
 }
 
+/// そのフレームで見せる素材の秒（MV-0012 決定1）。`timeRemap` があればその値・無ければ `startFrame` からの進み。
+/// ⚠️ 範囲の外の扱い（リマップは端で止める・無ければ描かない）は呼ぶ側＝素材の長さを知っている所で決める。
+pub fn source_sec(comp: &Composition, layer: &Layer, frame: f64) -> Result<f64, EvalError> {
+    match &layer.time_remap {
+        Some(a) => number_at(a, frame),
+        None => {
+            Ok((frame - layer.start_frame as f64) * f64::from(comp.fps.den)
+                / f64::from(comp.fps.num))
+        }
+    }
+}
+
 /// 親の変形まで掛けた「レイヤーの座標 → コンポジションの座標」（MV-0010 決定5＝AE の親子付け）。
 /// 子の変形 → 親の変形 → …（親の親まで）。⚠️ 不透明度は掛けない（親の不透明度は引き継がない）。
 /// 親が見える範囲の外でも、表示を切っていても、変形は効く。

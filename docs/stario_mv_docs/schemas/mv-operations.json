@@ -176,6 +176,28 @@
               {
                 "type": "object",
                 "additionalProperties": false,
+                "required": ["op", "layerId", "percent"],
+                "description": "速度を変える（MV-0012 決定3）。映像・音・入れ子のレイヤーだけ。percent＝100 で等速・200 で倍速・負で逆再生（0 は断る）。見せていた素材の区間（逆再生ならその終わりから）を保って、見える範囲の長さを直し（outFrame が動く＝遅くすれば長くなる）、timeRemap を始めと終わりの直線のキーフレーム2つで置き換える。⚠️ 他の項目のキーフレームの時刻は動かさない（AE の時間伸縮と違う）＝変形にキーフレームか式があれば warnings で知らせる。",
+                "properties": {
+                  "op": { "const": "setSpeed" },
+                  "layerId": { "type": "string" },
+                  "percent": { "type": "number" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "layerId"],
+                "description": "タイムリマップの入り切り（MV-0012 決定3＝AE の「タイムリマップ使用可能」）。映像・音・入れ子のレイヤーだけ。enabled（既定 true）＝今の見え方のまま、見える範囲の始めと終わりに今見せている素材の秒の直線のキーフレームを置く（既にあれば変えない）。false＝timeRemap を消す（startFrame からの進みに戻る＝見え方が変わりうる）。細かい値は updateLayer で timeRemap を直す（素材の秒・範囲の外は端のコマで止まる・音もその秒で鳴る）。",
+                "properties": {
+                  "op": { "const": "enableTimeRemap" },
+                  "layerId": { "type": "string" },
+                  "enabled": { "type": "boolean" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
                 "required": ["op", "composition"],
                 "description": "コンポジションを足す。composition には name・width・height・fps（{num, den}）・durationFrames を書く（background は既定で黒・layers と markers は空）。",
                 "properties": {

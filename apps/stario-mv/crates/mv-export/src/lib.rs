@@ -295,7 +295,29 @@ fn audio_inputs_at(
             let offset = l.start_frame as f64 / fps;
             let lo = l.in_frame.max(0) as f64 / fps;
             let hi = l.out_frame.min(comp.duration_frames as i64) as f64 / fps;
-            for i in audio_inputs_at(project, inner, project_dir, inner_fps, ffmpeg, depth + 1)? {
+            let inner_inputs =
+                audio_inputs_at(project, inner, project_dir, inner_fps, ffmpeg, depth + 1)?;
+            if let Some(remap) = &l.time_remap {
+                // タイムリマップ＝中の音をまず中の時刻で混ぜ、それを外の時刻へ並べ直す（MV-0012 決定2）
+                if inner_inputs.is_empty() || hi <= lo {
+                    continue;
+                }
+                let inner_dur = f64::from(inner.duration_frames) / inner_fps;
+                let key = format!("nested|{inner_inputs:?}|{inner_dur}|{remap:?}|{lo}|{hi}|{fps}");
+                let path = remapped_wav(&key, ffmpeg, &inner_inputs, inner_dur, lo, hi, |t| {
+                    mv_core::eval::source_sec(comp, l, t * fps)
+                })?;
+                v.push(AudioInput {
+                    path,
+                    source_start_sec: 0.0,
+                    duration_sec: hi - lo,
+                    at_sec: lo,
+                    volume_db: gain,
+                    channels: 2,
+                });
+                continue;
+            }
+            for i in inner_inputs {
                 if let Some(c) = place_nested(&i, offset, lo, hi, gain) {
                     v.push(c);
                 }
@@ -361,6 +383,48 @@ fn audio_inputs_at(
             Some(c) => c,
             None => probe_channels(ffmpeg, &path)?,
         };
+        if let Some(remap) = &l.time_remap {
+            // タイムリマップ＝見える範囲の各時刻でリマップの秒の音（MV-0012 決定2）
+            let (lo, hi) = (start as f64 / fps, end as f64 / fps);
+            if hi <= lo {
+                continue;
+            }
+            let src_dur = match asset.meta.as_ref().and_then(|m| m.duration_sec) {
+                Some(d) => d,
+                None => {
+                    mv_render::media::probe_av(&mv_render::media::ffprobe_beside(ffmpeg), &path)
+                        .map_err(ExportError::Render)?
+                        .duration_sec
+                        .ok_or_else(|| {
+                            ExportError::Render(RenderError::Asset(format!(
+                            "素材の長さを読めませんでした（{}）。素材を取り込み直してください。",
+                            path.display()
+                        )))
+                        })?
+                }
+            };
+            let src = AudioInput {
+                path: path.display().to_string(),
+                source_start_sec: 0.0,
+                duration_sec: src_dur,
+                at_sec: 0.0,
+                volume_db: 0.0,
+                channels,
+            };
+            let key = format!("layer|{src:?}|{remap:?}|{lo}|{hi}|{fps}");
+            let wav = remapped_wav(&key, ffmpeg, &[src], src_dur, lo, hi, |t| {
+                mv_core::eval::source_sec(comp, l, t * fps)
+            })?;
+            v.push(AudioInput {
+                path: wav,
+                source_start_sec: 0.0,
+                duration_sec: hi - lo,
+                at_sec: lo,
+                volume_db,
+                channels: 2,
+            });
+            continue;
+        }
         v.push(AudioInput {
             path: path.display().to_string(),
             source_start_sec: src0,
@@ -371,6 +435,144 @@ fn audio_inputs_at(
         });
     }
     Ok(v)
+}
+
+/// 混ぜる音の速さ（タイムリマップの音を並べ直すときの標本の速さ）。
+pub const REMAP_RATE: u32 = 48_000;
+
+/// 音（ステレオ・左右交互の f32・`rate`）を、外の時刻へ並べ直す（MV-0012 決定2・純粋）。
+/// 外の `start_sec` から `frames` 標本ぶん、各標本の時刻 t で素材の `sec_at(t)` 秒の音を、間を直線で補って取る。
+/// 素材の範囲の外は無音。速くすれば高く・遅くすれば低く・逆向きなら逆に鳴る（AE と同じ）。
+pub fn remap_pcm(
+    src: &[f32],
+    rate: u32,
+    start_sec: f64,
+    frames: usize,
+    sec_at: impl Fn(f64) -> f64,
+) -> Vec<f32> {
+    let n = src.len() / 2;
+    let r = f64::from(rate);
+    let mut out = vec![0.0f32; frames * 2];
+    for (i, o) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        let pos = sec_at(start_sec + i as f64 / r) * r;
+        if !pos.is_finite() || pos < 0.0 || pos > (n.max(1) - 1) as f64 || n == 0 {
+            continue;
+        }
+        let k = pos.floor() as usize;
+        let k1 = (k + 1).min(n - 1);
+        let w = (pos - k as f64) as f32;
+        for c in 0..2 {
+            o[c] = src[k * 2 + c] * (1.0 - w) + src[k1 * 2 + c] * w;
+        }
+    }
+    out
+}
+
+/// 32 ビット浮動小数・ステレオの WAV の中身（純粋）。
+pub fn wav_f32(rate: u32, pcm: &[f32]) -> Vec<u8> {
+    let data_len = (pcm.len() * 4) as u32;
+    let mut b = Vec::with_capacity(44 + pcm.len() * 4);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data_len).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&3u16.to_le_bytes()); // 浮動小数
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 8).to_le_bytes());
+    b.extend_from_slice(&8u16.to_le_bytes());
+    b.extend_from_slice(&32u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data_len.to_le_bytes());
+    for s in pcm {
+        b.extend_from_slice(&s.to_le_bytes());
+    }
+    b
+}
+
+/// タイムリマップの音を一時の WAV にする（MV-0012 決定2）。`src` を書き出しと同じ混ぜ方で `src_dur` 秒ほどき、
+/// 外の `lo`〜`hi` 秒へ [`remap_pcm`] で並べ直す。中身（`key`）で名前を決めて使い回す。
+fn remapped_wav(
+    key: &str,
+    ffmpeg: &Path,
+    src: &[AudioInput],
+    src_dur: f64,
+    lo: f64,
+    hi: f64,
+    sec_at: impl Fn(f64) -> Result<f64, mv_core::eval::EvalError>,
+) -> Result<String, ExportError> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut h);
+    let dir = std::env::temp_dir().join("stario-mv-audio");
+    let path = dir.join(format!("{:016x}.wav", h.finish()));
+    if path.is_file() {
+        return Ok(path.display().to_string());
+    }
+    // 先に値を求めておく（壊れた値なら知らせる＝黙って無音にしない）
+    sec_at(lo).map_err(|e| ExportError::Render(RenderError::Eval(format!("{e:?}"))))?;
+    let out = Command::new(ffmpeg)
+        .args(mix_args(src, src_dur, REMAP_RATE))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| ExportError::FfmpegNotFound(e.to_string()))?;
+    if !out.status.success() {
+        return Err(ExportError::Ffmpeg(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    let pcm: Vec<f32> = out
+        .stdout
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
+        .collect();
+    let frames = ((hi - lo) * f64::from(REMAP_RATE)).round().max(0.0) as usize;
+    let remapped = remap_pcm(&pcm, REMAP_RATE, lo, frames, |t| {
+        sec_at(t).unwrap_or(f64::NAN)
+    });
+    std::fs::create_dir_all(&dir).map_err(ExportError::Io)?;
+    sweep_old(&dir, REMAP_KEEP);
+    // 書きかけを読まれないよう、別の名前に書いてから置き換える
+    let tmp = dir.join(format!(
+        "{:016x}.{}.writing",
+        h.finish(),
+        std::process::id()
+    ));
+    std::fs::write(&tmp, wav_f32(REMAP_RATE, &remapped)).map_err(ExportError::Io)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        std::fs::remove_file(&tmp).ok();
+        // 同時に作った別の呼び出しが先に置いたなら、それを使う
+        if !path.is_file() {
+            return Err(ExportError::Io(e));
+        }
+    }
+    Ok(path.display().to_string())
+}
+
+/// タイムリマップの一時の音を残す長さ（これより前に作ったものは、次に作るときに消す）。
+pub const REMAP_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// `dir` の中の、`keep` より前に作った一時の音（`.wav`・書きかけ）を消す。消せなくても止めない（使っている途中かもしれない）。
+pub fn sweep_old(dir: &Path, keep: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for e in entries.flatten() {
+        let p = e.path();
+        let ours = p.extension().is_some_and(|x| x == "wav" || x == "writing");
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > keep);
+        if ours && old {
+            std::fs::remove_file(&p).ok();
+        }
+    }
 }
 
 /// 入れ子の中の音を外の時刻へ置き直す（`offset` だけ後ろへ・外の `lo`〜`hi` 秒で切る・`gain_db` を足す）。範囲に入らなければ None。
@@ -496,7 +698,83 @@ pub fn parse_channels(info: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_channels, place_nested, AudioInput};
+    use super::{parse_channels, place_nested, remap_pcm, wav_f32, AudioInput};
+
+    #[test]
+    fn 音を並べ直す_等速_半分_逆向き_範囲の外は無音() {
+        // 左＝0,1,2,3,4（標本ごと）・右＝その 10 倍
+        let src: Vec<f32> = (0..5).flat_map(|i| [i as f32, i as f32 * 10.0]).collect();
+        let r = 10;
+        // 等速：外の 0.1 秒から 3 標本＝素材の 0.1〜0.3 秒
+        assert_eq!(
+            remap_pcm(&src, r, 0.1, 3, |t| t),
+            vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0]
+        );
+        // 半分の速さ＝間を直線で補う
+        assert_eq!(
+            remap_pcm(&src, r, 0.0, 3, |t| t / 2.0),
+            vec![0.0, 0.0, 0.5, 5.0, 1.0, 10.0]
+        );
+        // 逆向き
+        assert_eq!(
+            remap_pcm(&src, r, 0.0, 3, |t| 0.4 - t),
+            vec![4.0, 40.0, 3.0, 30.0, 2.0, 20.0]
+        );
+        // 範囲の外（負・最後の標本より後・求められない値）は無音
+        assert_eq!(remap_pcm(&src, r, 0.0, 1, |_| -0.05), vec![0.0, 0.0]);
+        assert_eq!(remap_pcm(&src, r, 0.0, 1, |_| 0.45), vec![0.0, 0.0]);
+        assert_eq!(remap_pcm(&src, r, 0.0, 1, |_| f64::NAN), vec![0.0, 0.0]);
+        // 最後の標本ちょうどは鳴る
+        assert_eq!(remap_pcm(&src, r, 0.0, 1, |_| 0.4), vec![4.0, 40.0]);
+        // 空の素材は無音
+        assert_eq!(remap_pcm(&[], r, 0.0, 2, |t| t), vec![0.0; 4]);
+    }
+
+    #[test]
+    fn 古い一時の音だけ消す() {
+        let dir = std::env::temp_dir().join(format!("mv-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["a.wav", "b.x.writing", "keep.txt"] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+        }
+        // まだ新しい＝消さない
+        super::sweep_old(&dir, std::time::Duration::from_secs(3600));
+        assert!(dir.join("a.wav").is_file());
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        // 残す長さを過ぎた＝一時の音と書きかけだけ消す（他のファイルは触らない）
+        super::sweep_old(&dir, std::time::Duration::from_millis(10));
+        assert!(!dir.join("a.wav").exists());
+        assert!(!dir.join("b.x.writing").exists());
+        assert!(dir.join("keep.txt").is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 浮動小数の_wav_の頭() {
+        let b = wav_f32(48_000, &[0.5, -0.5]);
+        assert_eq!(b.len(), 44 + 8);
+        assert_eq!(&b[0..4], b"RIFF");
+        assert_eq!(u32::from_le_bytes(b[4..8].try_into().unwrap()), 36 + 8);
+        assert_eq!(
+            u16::from_le_bytes(b[20..22].try_into().unwrap()),
+            3,
+            "浮動小数"
+        );
+        assert_eq!(
+            u16::from_le_bytes(b[22..24].try_into().unwrap()),
+            2,
+            "ステレオ"
+        );
+        assert_eq!(u32::from_le_bytes(b[24..28].try_into().unwrap()), 48_000);
+        assert_eq!(
+            u32::from_le_bytes(b[28..32].try_into().unwrap()),
+            48_000 * 8
+        );
+        assert_eq!(u16::from_le_bytes(b[32..34].try_into().unwrap()), 8);
+        assert_eq!(u16::from_le_bytes(b[34..36].try_into().unwrap()), 32);
+        assert_eq!(u32::from_le_bytes(b[40..44].try_into().unwrap()), 8);
+        assert_eq!(f32::from_le_bytes(b[44..48].try_into().unwrap()), 0.5);
+    }
 
     fn input(at: f64, dur: f64) -> AudioInput {
         AudioInput {

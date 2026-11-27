@@ -180,6 +180,38 @@ export function precomposeOp(comp: Composition, ids: ReadonlySet<string>, name: 
   return layerIds.length === 0 ? null : { op: "precompose", layerIds, name };
 }
 
+/** 時刻を持つレイヤー（映像・音・入れ子）＝速度・タイムリマップを持てる（MV-0012 決定3）。 */
+export function isTimed(l: Layer): boolean {
+  return l.type === "video" || l.type === "audio" || l.type === "precomp";
+}
+
+/**
+ * 速度（%）＝タイムリマップが無ければ 100・直線のキーフレーム2つなら傾き。
+ * それ以外（固定値・3つ以上・直線でない・式）は null＝細かいリマップ（MV-0012 決定4）。
+ */
+export function speedOf(l: Layer, fps: number): number | null {
+  const r = l.timeRemap;
+  if (!r) return 100;
+  const ks = r.keyframes;
+  if (r.expression || !ks || ks.length !== 2 || ks[0].interpolation !== "linear") return null;
+  const [a, b] = ks;
+  if (typeof a.value !== "number" || typeof b.value !== "number" || b.frame === a.frame) return null;
+  return (((b.value - a.value) * fps) / (b.frame - a.frame)) * 100;
+}
+
+/** 速度を変える（0・時刻を持たない・錠は null）。 */
+export function setSpeedOp(l: Layer, percent: number): Op | null {
+  if (!isTimed(l) || l.locked || !Number.isFinite(percent) || percent === 0) return null;
+  return { op: "setSpeed", layerId: l.id, percent };
+}
+
+/** タイムリマップの入り切り（`Ctrl+Alt+T`＝AE と同じ）。選んだ時刻を持つレイヤーごとに、今と逆へ。 */
+export function toggleTimeRemapOps(comp: Composition, ids: ReadonlySet<string>): Op[] {
+  return editable(comp, ids)
+    .filter(isTimed)
+    .map((l) => ({ op: "enableTimeRemap", layerId: l.id, enabled: !l.timeRemap }));
+}
+
 /** 範囲の選択（`Shift`＝基点からの間を全部）。並びの順で返す。 */
 export function rangeSelect(comp: Composition, anchor: string, to: string): string[] {
   const ids = comp.layers.map((l) => l.id);
