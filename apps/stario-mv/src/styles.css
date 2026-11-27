@@ -630,4 +630,43 @@ input:focus-visible {
 .tl-kf.selected {
   outline: 2px solid #fff;
 }
+/* イージングのグラフ（MV-0015） */
+.tl-graph {
+  position: absolute;
+  z-index: 1;
+  background: #15171c;
+  border-top: 1px solid #23262c;
+  overflow: hidden;
+}
+.graph-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.graph-title {
+  color: var(--muted, #9aa0aa);
+  margin-right: 8px;
+}
+.graph-svg {
+  display: block;
+}
+.graph-handle {
+  fill: #15171c;
+  stroke: #f0c060;
+  stroke-width: 2;
+  cursor: move;
+}
+.graph-key {
+  fill: var(--warn);
+  cursor: ns-resize;
+}
+.graph-tick {
+  fill: var(--warn);
+}
+.graph-empty {
+  padding: 12px;
+}
 

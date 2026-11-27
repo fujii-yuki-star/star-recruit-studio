@@ -20,6 +20,7 @@
 - 速度変更・タイムリマップ：[`adr/MV-0012`](adr/MV-0012-time-remap.md)（そのフレームで見せる素材の秒・範囲の外は端で止める・音も沿って鳴らす〔高さも変わる〕・速度は直線のキーフレーム2つ＝欄を増やさない）
 - モーションブラー：[`adr/MV-0013`](adr/MV-0013-motion-blur.md)（レイヤーとコンポジションの両方のスイッチ・シャッター角 180°／位相 −90°／サンプル 16・変形をぼかす・平均した絵に描画モードを1回・schemaVersion 0.2.0）
 - レイヤー＋キーフレームの画面：[`adr/MV-0014`](adr/MV-0014-keyframe-timeline.md)（▸で値の行を開く・U・キーを選ぶ／動かす／消す・止める／イージーイーズ・J／K＝AE の型・形は変えない）
+- イージングのグラフ：[`adr/MV-0015`](adr/MV-0015-graph-editor.md)（帯の場所をグラフに＝Shift+F3・値と速さ・取っ手を掴んで easeOut／easeIn を書く・キーを上下で値・形は変えない）
 - 元に戻す・自動保存・復旧：[`adr/MV-0009`](adr/MV-0009-undo-history-recovery.md)（画面と AI の取引を1本の履歴に・動画のフォルダの history/ に 200 回分・AI にも undo/redo・錠は OS の錠・壊れたら履歴の最後から開く）
 - プレビュー画面：[`adr/MV-0007`](adr/MV-0007-preview-screen.md)（描画の核の絵を窓へ写す・再生の時計と落としたコマ・外の変更をすぐ映す・操作のキー）
 - プレビューの方式：[`adr/MV-0002`](adr/MV-0002-preview-native-window.md)（ネイティブの窓＋透明な画面を重ねる）・試作の結果 [`research/2026-11-preview-spike.md`](research/2026-11-preview-spike.md)
