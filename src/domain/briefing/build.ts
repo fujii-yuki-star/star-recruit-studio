@@ -33,11 +33,11 @@ export interface BriefingBuildInput {
   /** 最後の場面の「作り方」の一言（`briefingHowText`）。 */
   closingHowText?: string | null;
   /**
-   * 最後の場面のロゴの素材を作る（会社の見た目のロゴを使うとき）。`existingAssetIds` と重ならない番号で作って返す。
+   * 最後の場面のロゴの素材を作る（いつもの見た目のロゴを使うとき）。`existingAssetIds` と重ならない番号で作って返す。
    * 無い・使わないときは渡さない（または null を返す）。
    */
   makeLogoAsset?: (existingAssetIds: readonly string[]) => Asset | null;
-  /** 差し色（会社の色の1つ目）。 */
+  /** 差し色（いつもの色の1つ目）。 */
   accentColor?: string | null;
   /** 使える見た目パターン（最後の場面の器を探す）。 */
   templates: readonly Template[];

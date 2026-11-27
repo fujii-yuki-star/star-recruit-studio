@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 「会社の見た目」への入口（#1032）。設定画面の奥だけにあり、素材・見た目を選んでいるときに辿れなかった。
+// 「いつもの見た目」への入口（#1032）。設定画面の奥だけにあり、素材・見た目を選んでいるときに辿れなかった。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -8,7 +8,7 @@ import { MaterialsScreen } from "../screens/MaterialsScreen";
 import { LooksScreen } from "../screens/LooksScreen";
 import { BRAND_KIT_LINK_LABEL, BrandKitLink } from "./BrandKitLink";
 
-describe("会社の見た目への入口（#1032）", () => {
+describe("いつもの見た目への入口（#1032）", () => {
   beforeEach(() => {
     useProjectStore.getState().setSettingsFocus(null);
   });
@@ -30,7 +30,7 @@ describe("会社の見た目への入口（#1032）", () => {
 
 // ⚠️ **置いただけでは届かない**（α-6 出口監査 🔴1 と同じ型）＝部品を作っても
 // **画面へ配線し忘れればどこからも押せない**ので、実際に描いて確かめる。
-describe("会社の見た目への入口は、実際に両方の画面に出ている（#1032）", () => {
+describe("いつもの見た目への入口は、実際に両方の画面に出ている（#1032）", () => {
   beforeEach(() => {
     useProjectStore.getState().setSettingsFocus(null);
     useProjectStore.setState({

@@ -110,7 +110,7 @@ describe("一時の動画を作る", () => {
     expect((fs.copied[0].files as { toRelPath: string }[]).map((f) => f.toRelPath)).not.toContain("voices/scene_001.wav");
   });
 
-  it("会社の見た目のロゴを写して締めの場面に置く（登録で「置かない」なら写さない）", async () => {
+  it("いつもの見た目のロゴを写して締めの場面に置く（登録で「置かない」なら写さない）", async () => {
     fs.kit = { logoLibraryAssetId: "lib_asset_001", colors: ["#cc3300"] };
     fs.library = [{ id: "lib_asset_001", fileName: "logo.png", assetType: "image", displayName: "ロゴ", tags: [] }];
     await prepareBriefingVideo(input());

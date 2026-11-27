@@ -10,7 +10,7 @@ import type { FreeElement, Scene } from '../project/types';
 import type { Template } from '../template/types';
 import { isUserTemplate } from '../template/userTemplate';
 
-/** 締めの見た目の色（会社の色が無いときの差し色・地・文字）。 */
+/** 締めの見た目の色（いつもの色が無いときの差し色・地・文字）。 */
 export const BRIEFING_CLOSING_COLORS = {
   ground: '#f5f7fa',
   text: '#1d2430',
@@ -35,7 +35,7 @@ export function briefingHowText(input: { interestLabels: readonly string[]; scen
 
 /**
  * 向きごとの寸法。**ロゴ → 差し色の線 → 文**を1つのまとまりにして、画面の縦の真ん中に置く（ロゴが無ければ線と文だけ）。
- * 下の端に差し色の帯を敷く（締めの場面だと分かる・会社の色が入る）。
+ * 下の端に差し色の帯を敷く（締めの場面だと分かる・いつもの色が入る）。
  */
 const LAYOUT: Record<Orientation, { w: number; h: number; logo: { w: number; h: number }; textW: number; textLines: number; fontSize: number; howFontSize: number; gap: number }> = {
   [ORIENTATION.landscape]: { w: 1920, h: 1080, logo: { w: 640, h: 260 }, textW: 1440, textLines: 2, fontSize: 52, howFontSize: 32, gap: 48 },
@@ -64,7 +64,7 @@ export interface BriefingClosingInput {
   howText?: string | null;
   /** 置くロゴの素材の番号（一時の動画の中の番号）。無ければ置かない。 */
   logoAssetId: string | null;
-  /** 差し色（会社の色の1つ目）。無ければ既定。 */
+  /** 差し色（いつもの色の1つ目）。無ければ既定。 */
   accentColor?: string | null;
   /** 使える見た目パターン（向きに合う自由配置の器を探す）。 */
   templates: readonly Template[];

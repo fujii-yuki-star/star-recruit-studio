@@ -80,6 +80,8 @@ describe("うまくいかないときの記録（#396）", () => {
   it("記録に入るものを説明する（送る前に見当がつく）", async () => {
     const { container } = render(<TroubleLogSection />);
     await screen.findByRole("button", { name: "記録の場所を開く" });
-    expect(container.textContent).toMatch(/入力した会社の情報や写真の説明などが記録に含まれることがある/);
+    expect(container.textContent).toMatch(/入力した内容や写真の説明などが記録に含まれることがある/);
+    // 本体は一般向け＝「会社の情報」と種類に寄せない（ADR-0076 の続き）。
+    expect(container.textContent).not.toMatch(/会社/);
   });
 });

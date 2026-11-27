@@ -1,6 +1,6 @@
-// ブランドキット（ADR-0036・#351）。会社の既定フォント・色・ロゴをひとまとめに覚える。
+// ブランドキット（ADR-0036・#351）。いつもの文字の形・色・ロゴ（画面名「いつもの見た目」）をひとまとめに覚える。
 //
-// ⚠️ **技術用語を出さない**（§2-3）＝「ブランドキット」「アセット」は出さず「会社の見た目」と書く。
+// ⚠️ **技術用語を出さない**（§2-3）＝「ブランドキット」「アセット」は出さず「いつもの見た目」と書く。
 // ⚠️ **自動では遡及しない**（決定3・§2-5）＝既にある動画は「この動画に反映する」を押したときだけ変わる。
 // 押す前に**何が変わるか**を見せる（#547 の「まとめて標準にする」と同型）。
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -37,7 +37,7 @@ export function BrandKitSection({ onNavigate }: { onNavigate?: (screen: ScreenId
   // 2つ目の赤字が増えるだけ（同じ状態に断り方が2通り）。同じ画面の書き出し中のボタンは
   // 既に `disabled`＋`title` で押す前に断っており、そちらへ揃える。
   const unreadableGuard = brandKitUnreadable
-    ? { disabled: true, title: "会社の見た目を読めていないので、いまは変えられません。アプリを開き直してからお試しください。" }
+    ? { disabled: true, title: "いつもの見た目を読めていないので、いまは変えられません。アプリを開き直してからお試しください。" }
     : {};
   const refreshBrandKit = useProjectStore((s) => s.refreshBrandKit);
   /**
@@ -150,7 +150,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
 
   return (
     <div className="card" ref={cardRef}>
-      <h2 className="section-title">会社の見た目</h2>
+      <h2 className="section-title">いつもの見た目</h2>
       <p className="page-desc text-pretty">
         よく使う文字の形・色・ロゴを覚えておくと、新しい動画に最初から入ります。
         すでに作った動画は自動では変わりません（下のボタンを押したときだけ反映します）。
@@ -163,7 +163,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
       {brandKitUnreadable && (
         <div className="notice notice-warn" role="alert">
           <p>
-            会社の見た目を読めませんでした。覚えている内容を失わないよう、いまは変更できません。
+            いつもの見た目を読めませんでした。覚えている内容を失わないよう、いまは変更できません。
             アプリを開き直すと直ることがあります。
           </p>
           {/* ⚠️ **行き止まりを作らない**（差分再監査 🟡・§2-5）＝上書きを断る門を下ろせるのは
@@ -215,7 +215,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
       </div>
 
       <div className="field">
-        <span className="field-label">会社の色（{colors.length}／{BRAND_COLORS_MAX}）</span>
+        <span className="field-label">いつもの色（{colors.length}／{BRAND_COLORS_MAX}）</span>
         {/* ⚠️ **色を選ぶところの候補の先頭に出る**（決定4）＝既定の色は残る。 */}
         <p className="field-hint">ここに入れた色は、色を選ぶときにいちばん上に並びます。</p>
         <div className="chip-input-row">
@@ -314,7 +314,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
           // ⚠️ **タイムラインだけ開いているときに「開いていません」と言わない**（嘘の理由・§2-5）。
           <p className="field-hint">
             {timelineOpen
-              ? "タイムラインで作った動画には、ここからは反映できません。会社の見た目は、新しく作る動画に最初から入ります。"
+              ? "タイムラインで作った動画には、ここからは反映できません。いつもの見た目は、新しく作る動画に最初から入ります。"
               : "いまは動画を開いていません。動画を開くと、ここから反映できます。"}
           </p>
         ) : (
@@ -324,7 +324,7 @@ ${BRAND_FONT_NOT_APPLIED_MESSAGE}` : ""}`);
               覚えている中身が読めていないだけで、**同じだと確かめたわけではない**。上の断りと合わせて
               「いまは反映できない」と言う（嘘の安心を出さない）。 */}
           {brandKitUnreadable ? (
-            <p className="field-hint">会社の見た目を読めていないので、いまは反映できません。</p>
+            <p className="field-hint">いつもの見た目を読めていないので、いまは反映できません。</p>
           ) : nothingToApply ? (
             <p className="field-hint">この動画は、覚えている見た目と同じです。反映するものはありません。</p>
           ) : (

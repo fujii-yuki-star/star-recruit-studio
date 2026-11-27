@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // #952：**白紙から作る**の着地先はたたき台なのに、この画面だけ知らせ（`importError`）を描いていなかった。
-// 会社の見た目の文字の形が入らなかったこと（#929）は**新しい動画を作った直後**に立つので、
+// いつもの見た目の文字の形が入らなかったこと（#929）は**新しい動画を作った直後**に立つので、
 // 描かないと**誰にも届かない**まま既定の字体で作り始めることになる（素材画面へ寄って初めて出る）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -20,7 +20,7 @@ describe("たたき台でも知らせを描く（#952）", () => {
     } as never);
   });
 
-  it("会社の見た目の文字の形が入らなかった知らせが出る", () => {
+  it("いつもの見た目の文字の形が入らなかった知らせが出る", () => {
     useProjectStore.setState({ importError: "覚えている文字の形は、いまこのパソコンにありません。" } as never);
     render(<DraftScreen onNavigate={vi.fn()} />);
     expect(screen.getByText(/いまこのパソコンにありません/)).toBeTruthy();

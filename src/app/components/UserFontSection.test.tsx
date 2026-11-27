@@ -54,10 +54,10 @@ describe("UserFontSection", () => {
 
   // ⚠️ **うまくいった知らせを赤字の理由欄に載せない**（`/canon-check` ℹ️）＝
   // 会社の既定字体を外せたのは**成功**なので、`role="alert"` の理由として出すと失敗に見える。
-  it("会社の見た目の指定も外したことは、理由ではなく知らせとして出す", async () => {
-    useProjectStore.setState({ fontNotice: "この文字の形を外したので、会社の見た目の指定も外しました。設定の「会社の見た目」から選び直せます。", fontError: null } as never);
+  it("いつもの見た目の指定も外したことは、理由ではなく知らせとして出す", async () => {
+    useProjectStore.setState({ fontNotice: "この文字の形を外したので、いつもの見た目の指定も外しました。設定の「いつもの見た目」から選び直せます。", fontError: null } as never);
     render(<UserFontSection />);
-    const msg = await screen.findByText(/会社の見た目の指定も外しました/);
+    const msg = await screen.findByText(/いつもの見た目の指定も外しました/);
     expect(msg).toBeInTheDocument();
     expect(msg.getAttribute("role")).not.toBe("alert");
     expect(msg.className).not.toContain("form-error");

@@ -70,7 +70,7 @@ interface Props {
  */
 export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ", onDragStart, onDragEnd, disabled, title }: Props) {
   // ⚠️ **ブランドカラーは渡してもらわず自分で読む**（#351）＝この部品は画面のあちこちから使われるので、
-  // prop で配ると**渡し忘れた画面だけ会社の色が出ない**（このα-6で何度も踏んだ「片方だけ漏れる」）。
+  // prop で配ると**渡し忘れた画面だけいつもの色が出ない**（このα-6で何度も踏んだ「片方だけ漏れる」）。
   const brandColors = useProjectStore((s) => s.brandKit.colors);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number; maxHeight?: number; overflowY?: "auto" } | null>(null);
@@ -526,7 +526,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             />
           </div>
 
-          {/* 定番パレット。⚠️ **ブランドカラー（ADR-0036・#351）を先頭に足す**＝会社の色を毎回
+          {/* 定番パレット。⚠️ **ブランドカラー（ADR-0036・#351）を先頭に足す**＝いつもの色を毎回
               探さなくてよくする。**既定18色は残す**（決定4）・重なる色は二重に出さない。 */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4 }}>
             {paletteWithBrand(brandColors, PRESET_COLORS).map((c) => (

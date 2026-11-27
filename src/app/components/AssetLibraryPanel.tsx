@@ -80,7 +80,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  // その断りから**そのまま直しに行ける**か（#1032 ℹ️）＝「設定の『会社の見た目』から選び直して
+  // その断りから**そのまま直しに行ける**か（#1032 ℹ️）＝「設定の『いつもの見た目』から選び直して
   // ください」と言うだけでは、行き先を自分で探させる（§2-5 の「次の行動」を言葉だけで済ませない）。
   const [errorGoesToBrandKit, setErrorGoesToBrandKit] = useState(false);
   // ⚠️ **種類も直せる**（差分再監査）＝**ロゴはファイル名から判らない**（拡張子は写真と同じ）ので、
@@ -177,7 +177,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
   // **白紙から作った直後**（まだ番号を採っていない）を「開いていません」と言ってしまい、
   // しかも一覧に無いので**案内どおりに開き直せない**（嘘の理由＋行き止まり・§2-5）。
   const sceneOpen = useProjectStore(hasOpenProject);
-  // ⚠️ **開いているかは文書の有無で見る**（PR #914 レビュー ℹ️）＝名前で見ると、会社の見た目の
+  // ⚠️ **開いているかは文書の有無で見る**（PR #914 レビュー ℹ️）＝名前で見ると、いつもの見た目の
   // 反映（`s.doc != null`）と**同じ意図なのに別の式**になり、将来 `projectName` の扱いが変わると片方だけ壊れる。
   const timelineOpen = useTimelineStore((s) => s.doc != null);
   const destOpen = target === PROJECT_FORMAT.timeline ? timelineOpen : sceneOpen;
@@ -301,11 +301,11 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
     setErrorGoesToBrandKit(false);
     setBusy(true);
     try {
-      // ⚠️ **消す前に「会社の見た目が指しているか」を覚える**＝下で書き換えるので、
+      // ⚠️ **消す前に「いつもの見た目が指しているか」を覚える**＝下で書き換えるので、
       // 判定を後回しにすると（読むタイミング次第で）知らせと実際がずれる。
       const wasBrandLogo = brandKit.logoLibraryAssetId === a.id;
       await deleteLibraryAsset(a.id);
-      // ⚠️ **会社の見た目が指したままにしない**（PR #888 レビュー 🟡）＝消した素材を指し続けると、
+      // ⚠️ **いつもの見た目が指したままにしない**（PR #888 レビュー 🟡）＝消した素材を指し続けると、
       // 新しい動画を作るたびに「ロゴを取り込めませんでした」になる（直す道が分かりにくい）。
       // ⚠️ **覚え直しの失敗を握りつぶさない**（差分再監査・§2-5）＝`updateBrandKit` は投げずに
       // `false` を返して**画面の側を巻き戻す**ようになった（🟡23）。戻り値を捨てると、キットは
@@ -316,12 +316,12 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
       // ⚠️ **既に取り込んだ動画は影響を受けない**ことを伝える（コピーだから＝不安を残さない）。
       setNotice(
         wasBrandLogo && brandOk
-          ? `「${a.displayName}」を置き場から外し、会社の見た目のロゴも外しました。取り込み済みの動画はそのまま使えます。`
+          ? `「${a.displayName}」を置き場から外し、いつもの見た目のロゴも外しました。取り込み済みの動画はそのまま使えます。`
           : `「${a.displayName}」を置き場から外しました。取り込み済みの動画はそのまま使えます。`,
       );
-      // ⚠️ **できなかったことは言う**＝素材は外れたが、会社の見た目は消した素材を指したまま。
+      // ⚠️ **できなかったことは言う**＝素材は外れたが、いつもの見た目は消した素材を指したまま。
       if (wasBrandLogo && !brandOk) {
-        setError("会社の見た目のロゴを外せませんでした。会社の見た目から選び直してください。");
+        setError("いつもの見た目のロゴを外せませんでした。いつもの見た目から選び直してください。");
         setErrorGoesToBrandKit(true);
       }
     } catch (e) {
@@ -334,7 +334,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
   async function onSaveEdit(): Promise<void> {
     if (!editing) return;
     // ⚠️ **前の断りの印を降ろす**（PR #1097 レビュー 🔴）＝ここだけ他の3つ（`onAdd`/`onImport`/`onDelete`）と
-    // 揃っておらず、**会社の見た目と関係ない失敗の下に、その入口が残った**（押した先で何もできない）。
+    // 揃っておらず、**いつもの見た目と関係ない失敗の下に、その入口が残った**（押した先で何もできない）。
     setError("");
     setErrorGoesToBrandKit(false);
     setBusy(true);
@@ -358,7 +358,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
     <div className="card">
       <h2 className="section-title">よく使う素材</h2>
       <p className="page-desc text-pretty">
-        会社のロゴや写真をここに置いておくと、どの動画からでも取り込めます。取り込んだ素材はその動画のものになるので、
+        ロゴや写真など、よく使うものをここに置いておくと、どの動画からでも取り込めます。取り込んだ素材はその動画のものになるので、
         ここから外しても取り込み済みの動画はそのまま使えます。
       </p>
 
@@ -430,7 +430,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
 
       {/* ⚠️ **件数に依らず出す**（差分再監査 2巡目）＝一度読めたあとに読めなくなると**古い一覧を
           そのまま見せて何も言わない**（外したはずの行が残る）。兄弟2か所（持ち込みフォント・
-          会社の見た目）は件数を見ずに出しているので、同じ状態の見せ方を揃える（ADR-0026②）。 */}
+          いつもの見た目）は件数を見ずに出しているので、同じ状態の見せ方を揃える（ADR-0026②）。 */}
       {unreadable && (
         <p className="form-error mt" role="alert">
           よく使う素材の一覧を読めませんでした。ここに出ているものは古いかもしれません。アプリを開き直してから、もう一度お試しください。
@@ -563,7 +563,7 @@ export function AssetLibraryPanel({ target, onNavigate }: { target?: typeof PROJ
             <input
               className="input"
               value={editing.tags}
-              placeholder="例：会社、ロゴ"
+              placeholder="例：ロゴ、背景"
               onChange={(e) => setEditing({ ...editing, tags: e.target.value })}
             />
           </label>

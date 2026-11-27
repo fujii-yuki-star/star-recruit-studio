@@ -70,7 +70,7 @@ describe('よく使う素材からの取り込み（🟡9）', () => {
   });
 });
 
-describe('会社の見た目を新しい動画へ（🟡21）', () => {
+describe('いつもの見た目を新しい動画へ（🟡21）', () => {
   it('読み直している間に別の動画を開いたら、その動画の文字の形を変えない', async () => {
     vi.mocked(loadBrandKit).mockImplementation(async () => {
       openAnotherProject();
