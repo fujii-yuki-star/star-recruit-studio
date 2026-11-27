@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 「使い方」画面（#1229・ADR-0046 ①）。
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 // ⚠️ **映像は「在るとき」と「無いとき」の両方を見る**＝同梱の目録はいま空なので、
@@ -16,7 +16,9 @@ const urls = vi.hoisted(() => ({ fn: (p: string): Promise<string | null> => Prom
 vi.mock("../../infrastructure/tutorialFs", () => ({ tutorialVideoUrl: (p: string) => urls.fn(p) }));
 
 import { HelpScreen } from "./HelpScreen";
-import { TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE } from "../uiLabels";
+import { TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE, VIDEO_KIND_LABEL } from "../uiLabels";
+import { VIDEO_KIND } from "../../domain/enums";
+import { setRecruitVideoKey } from "../../test/recruitVideo";
 
 beforeEach(() => {
   videos.list = [];
@@ -90,5 +92,20 @@ describe("使い方：同梱した映像", () => {
     fireEvent.click(screen.getByText("はじめての1本").closest("button")!);
     expect(await screen.findByText(TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE)).toBeTruthy();
     expect(container.querySelector("video")).toBeNull();
+  });
+});
+
+// ADR-0076 決定2：使い方が「採用動画」に触れるのは、拡張パックの鍵があるときだけ（画面は鍵を見て案内を選ぶ）。
+describe("使い方：採用動画は鍵があるときだけ（ADR-0076）", () => {
+  const recruitName = `「${VIDEO_KIND_LABEL[VIDEO_KIND.recruit]}」`;
+  afterEach(() => setRecruitVideoKey(false));
+  it("鍵が無いと採用動画に触れず、鍵があると触れる", () => {
+    setRecruitVideoKey(false);
+    const { unmount } = render(<HelpScreen />);
+    expect(document.body.textContent).not.toContain(recruitName);
+    unmount();
+    setRecruitVideoKey(true);
+    render(<HelpScreen />);
+    expect(document.body.textContent).toContain(recruitName);
   });
 });

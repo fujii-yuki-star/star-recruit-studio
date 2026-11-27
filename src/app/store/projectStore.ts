@@ -9,7 +9,7 @@ import { standardLookFixesForUnresolved } from '../../domain/template/templateSe
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, EXPORT_SIZE, type ExportSize, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, PROJECT_FORMAT, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, GENERAL_PURPOSES, NARRATION_STATUS, PROJECT_FORMAT, VIDEO_KIND, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { isFontAvailable, isKnownFontId } from "../../domain/font/fontCatalog";
 import { createUserFontId } from "../../domain/font/fontCatalog";
@@ -886,15 +886,19 @@ function defaultHeader(): ProjectHeader {
   return {
     projectId: "",
     projectName: "無題の動画",
-    purpose: "new_graduate",
+    // ⚠️ **新しい動画の土台は一般動画**（ADR-0076 決定4）＝本体は一般向けで、採用動画は拡張パックの鍵で出す。
+    //   目的は一般の先頭（ウィザードで種類を切り替えたときに寄せる先と同じ）。白紙から作った動画もこの形で保存される。
+    videoKind: VIDEO_KIND.general,
+    purpose: GENERAL_PURPOSES[0],
     createdAt: now,
     updatedAt: now,
     videoSettings: defaultVideoSettings(),
-    // 新規プロジェクトの会社情報は空で開く（#414・§2-6）。デモ値を既定にすると、未入力のまま進んだとき
-    // 「株式会社サンプル」の動画案ができ、実 AI キー設定時は無自覚のまま外部送信されてしまう。
-    // ウィザードは各欄の placeholder（例：株式会社サンプル）で入力を案内し、会社名は next() で必須にする。
-    companyInfo: {
-      companyName: "",
+    // 新しい動画の発表内容は空で開く（#414・§2-6）。デモ値を既定にすると、未入力のまま進んだとき
+    // 例の値で動画案ができ、外部の AI を使う設定では無自覚のまま外へ送られてしまう。
+    // ウィザードは各欄の placeholder で入力を案内し、テーマ・タイトルは next() で必須にする。
+    // 空の題で保存されるのは、以前の空の会社名と同じ扱い（読み込みで弾くのは構造の破損だけ）。
+    generalBrief: {
+      title: "",
     },
     voiceSettings: defaultVoiceSettings(),
   };

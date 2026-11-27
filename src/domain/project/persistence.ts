@@ -186,7 +186,10 @@ export function assembleProject(
 ): Project {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
-    videoKind: header.videoKind ?? VIDEO_KIND.recruit,
+    // ⚠️ 種類が無いときは**中身から決める**（ADR-0076 決定4）＝会社情報だけを持つなら採用・それ以外は一般（新しい動画の既定）。
+    //   一律に一般と書くと、会社情報だけを持つ文書が schema の排他（一般は generalBrief 必須）に落ちて保存できなくなる。
+    //   読み込みの移行（`migrateProject`）の「無ければ採用」は古い文書の互換の規則なので別物＝そちらは変えない。
+    videoKind: header.videoKind ?? (header.companyInfo && !header.generalBrief ? VIDEO_KIND.recruit : VIDEO_KIND.general),
     projectId: header.projectId,
     projectName: header.projectName,
     purpose: header.purpose,

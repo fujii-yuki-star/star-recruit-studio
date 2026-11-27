@@ -5,7 +5,9 @@
 // `Record<ScreenId, string>` なので**画面の全部**を持っている＝それと突き合わせる。
 import { describe, expect, it } from "vitest";
 import { SCREEN_TITLES } from "../screenTitles";
-import { HELP_FLOW, HELP_PLACES, HELP_TIMELINE, HELP_TIPS } from "./helpGuide";
+import { HELP_FLOW, HELP_PLACES, HELP_TIMELINE, HELP_TIPS, helpFlowFor } from "./helpGuide";
+import { noScenesMessage, VIDEO_KIND_LABEL } from "../uiLabels";
+import { VIDEO_KIND } from "../../domain/enums";
 
 const covered = [...HELP_FLOW, ...HELP_TIMELINE, ...HELP_PLACES].map((s) => s.screen);
 
@@ -61,5 +63,30 @@ describe("AI の手伝いの案内", () => {
     expect(textOf(all, "materials")).toContain(L.MATERIAL_NOTE_SHORT);
     expect(textOf(all, "settings")).toContain("このパソコンの中で動きます");
     expect(textOf(all, "timeline-project")).toContain("点を引く");
+  });
+});
+
+// ADR-0076 決定2・6：採用動画は拡張パックの鍵で出す＝鍵が無い人の案内は採用に触れない。
+describe("採用動画に触れるのは鍵があるときだけ（ADR-0076）", () => {
+  const all = (steps: readonly { summary: string; detail: readonly string[] }[]): string =>
+    steps.flatMap((s) => [s.summary, ...s.detail]).join("\n");
+  it("鍵が無い案内（既定）は、どこにも採用動画の名前も「採用」も出さない", () => {
+    expect(all(HELP_FLOW)).toBe(all(helpFlowFor(false)));
+    expect(all(helpFlowFor(false))).not.toContain("採用");
+  });
+  it("鍵がある案内は、一般→採用の順で2つの種類に触れ、ほかの段は同じ", () => {
+    const text = all(helpFlowFor(true));
+    const g = text.indexOf(`「${VIDEO_KIND_LABEL[VIDEO_KIND.general]}」`);
+    const r = text.indexOf(`「${VIDEO_KIND_LABEL[VIDEO_KIND.recruit]}」`);
+    expect(g).toBeGreaterThanOrEqual(0);
+    expect(r).toBeGreaterThan(g);
+    // 違うのは最初の段の1行だけ（案内の段の並びは鍵で変わらない）。
+    expect(helpFlowFor(true).map((s) => s.screen)).toEqual(helpFlowFor(false).map((s) => s.screen));
+    expect(all(helpFlowFor(true).slice(1))).toBe(all(helpFlowFor(false).slice(1)));
+  });
+  it("ホームの「まだ動画案がありません」の案内は、会社情報を求めない（種類に寄せない）", () => {
+    const idle = noScenesMessage("idle", false, "");
+    expect(idle).not.toContain("会社");
+    expect(idle).toContain("新しい動画を作る");
   });
 });

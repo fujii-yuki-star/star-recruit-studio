@@ -123,6 +123,14 @@ describe('機能の鍵と外す前の数え上げ', () => {
     expect(isPackFeatureEnabled([manifest()], PACK_FEATURE.personalizedBriefing)).toBe(false);
     expect(isPackFeatureEnabled([], PACK_FEATURE.personalizedBriefing)).toBe(false);
   });
+  // ADR-0076 決定1：採用動画は別の鍵＝あなた向け会社説明の鍵では出ない（逆も同じ）。
+  it('採用動画の鍵は、あなた向け会社説明の鍵と別に効く（ADR-0076 決定1）', () => {
+    const recruit = manifest({ contents: { features: [PACK_FEATURE.recruitVideo] } });
+    const briefing = manifest({ contents: { features: [PACK_FEATURE.personalizedBriefing] } });
+    expect(isPackFeatureEnabled([recruit], PACK_FEATURE.recruitVideo)).toBe(true);
+    expect(isPackFeatureEnabled([recruit], PACK_FEATURE.personalizedBriefing)).toBe(false);
+    expect(isPackFeatureEnabled([briefing], PACK_FEATURE.recruitVideo)).toBe(false);
+  });
   it('そのパックの見た目パターンを使う場面だけを数える', () => {
     expect(countPackTemplateUses('office_looks', ['pack_office_looks__a', 'pack_office_looks__b', 'pack_other__a', 'opening_v1'])).toBe(2);
   });

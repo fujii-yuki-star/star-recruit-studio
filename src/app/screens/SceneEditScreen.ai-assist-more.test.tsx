@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { NARRATION_STATUS } from "../../domain/enums";
+import { NARRATION_STATUS, VIDEO_KIND } from "../../domain/enums";
 import type { Scene } from "../../domain/project/types";
 
 const ai = vi.hoisted(() => ({ available: true, calls: [] as { system: string; user: string }[], reply: "" }));
@@ -50,7 +50,8 @@ beforeEach(() => {
     status: "ready", templates: [TEMPLATE], scenes: [dialogue()],
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
     editingSceneId: "scene_001", sceneEditTrail: null, past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
-    meta: { ...st.meta, projectName: "無題の動画", companyInfo: { companyName: "株式会社サンプル物流" } },
+    // ⚠️ 採用動画として置く＝新しい動画の土台は一般になった（ADR-0076 決定4）ので、会社情報だけ足すと種類と中身が食い違う。
+    meta: { ...st.meta, projectName: "無題の動画", videoKind: VIDEO_KIND.recruit, purpose: "new_graduate", generalBrief: undefined, companyInfo: { companyName: "株式会社サンプル物流" } },
   }));
 });
 

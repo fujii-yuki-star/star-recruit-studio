@@ -6,12 +6,13 @@ import * as assetFsMod from '../../infrastructure/assetFs';
 import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as templateAssetFsMod from '../../infrastructure/templateAssetFs';
 import * as aiClient from '../../infrastructure/aiClient';
-import { assembleProject } from '../../domain/project/persistence';
+import { assembleProject, parseProjectDoc } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { parseTemplatePack } from '../../infrastructure/templateFs';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
 import { MAX_SCENES_PER_VIDEO } from '../../domain/constants';
+import { GENERAL_PURPOSES, VIDEO_KIND } from '../../domain/enums';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { templateSaveMessage } from '../uiLabels';
@@ -1014,13 +1015,28 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(useProjectStore.getState().exportRun.resultPath).toBe('');
   });
 
-  it('newProject の会社情報は空＝デモ会社を既定にしない（#414・§2-6）', () => {
+  it('newProject の発表内容は空＝例の値を既定にしない（#414・§2-6）', () => {
     useProjectStore.getState().setExportRun({ phase: 'idle' }); // ガードを外す
     useProjectStore.getState().newProject();
-    const ci = useProjectStore.getState().meta.companyInfo;
-    expect(ci?.companyName).toBe(''); // 「株式会社サンプル」等を入れない
-    expect(ci?.industry ?? '').toBe('');
-    expect(ci?.strengths ?? []).toEqual([]);
+    const m = useProjectStore.getState().meta;
+    expect(m.generalBrief).toEqual({ title: '' }); // 例のテーマ等を入れない
+    expect(m.companyInfo).toBeUndefined();
+  });
+
+  // ADR-0076 決定4：新しい動画の土台は一般動画（採用動画は拡張パックの鍵で出す）。
+  it('newProject の土台は一般動画＝種類は一般・目的は一般の先頭・保存しても一般（ADR-0076 決定4）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().newProject();
+    const m = useProjectStore.getState().meta;
+    expect(m.videoKind).toBe(VIDEO_KIND.general);
+    expect(m.purpose).toBe(GENERAL_PURPOSES[0]);
+    // 白紙のまま保存しても一般として書かれ、正典の形を満たす（構造の検査＝読み込みで弾かれない）。
+    const doc = assembleProject(m, [], [], []);
+    expect(doc.videoKind).toBe(VIDEO_KIND.general);
+    expect('companyInfo' in doc).toBe(false);
+    expect(doc.generalBrief).toEqual({ title: '' });
+    // 読み戻しても一般のまま（読み込みは構造の破損だけを弾く＝空の題は通る・#416）。
+    expect(parseProjectDoc(JSON.stringify(doc)).videoKind).toBe(VIDEO_KIND.general);
   });
 
   it('wizardStep は setWizardStep で保持し、newProject で 0 に戻る（#401）', () => {

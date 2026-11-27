@@ -30,13 +30,17 @@ export interface WizardStep {
   readonly backName: string;
 }
 
-export function stepsFor(videoKind: VideoKind): readonly WizardStep[] {
+export function stepsFor(videoKind: VideoKind, kindChoice: boolean): readonly WizardStep[] {
   const second: WizardStep =
     videoKind === VIDEO_KIND.general
       ? { label: "発表の内容を入力", backName: "発表の内容" }
       : { label: "会社情報を入力", backName: "会社情報" };
+  // ⚠️ **種類を選ばせないときは名札から「種類」を外す**（ADR-0076 決定2）＝画面に無いものを名指さない（`06 §12.1`）。
+  const first: WizardStep = kindChoice
+    ? { label: "動画の種類と目的", backName: "動画の種類と目的" }
+    : { label: "動画の目的", backName: "動画の目的" };
   return [
-    { label: "動画の種類と目的", backName: "動画の種類と目的" },
+    first,
     second,
     { label: "写真・動画を追加", backName: "写真・動画" },
     { label: "AIに動画案を作ってもらう", backName: "動画案" },
@@ -58,4 +62,25 @@ export function wizardBackLabel(step: number, steps: readonly WizardStep[]): str
   //（呼び名の規則は `WizardScreen.test.tsx` が全段に当てている）。
   const prev = steps[step - 1];
   return prev ? `${prev.backName}へ戻る` : BACK_TO_HOME_LABEL;
+}
+
+/**
+ * ウィザードに出す動画の種類と、その並び（ADR-0076 決定2・3・5）。
+ *
+ * - 「採用動画」は**拡張パックの鍵 `recruit-video` がある**か、**開いている動画の保存済みの種類が採用**のときだけ出す
+ *   （鍵が無くても、以前に作った採用動画は見直せる＝決定3）。
+ * - 並びは**一般が先**（決定5）。
+ * - ⚠️ 保存済みの種類は**ウィザードを開いたときの値**を渡す＝一般へ切り替えた途端に採用のカードが消えると、戻せない（決定3）。
+ * - ⚠️ **いま選んでいる種類も見る**＝開いている間に鍵が外れても、選んでいる採用のカードを消さない
+ *   （消すと、採用の欄を出したまま種類の選択だけが無くなり、一般へ切り替える道が消える）。
+ * - 1つしか無いとき、画面は種類の選択そのものを出さない（選択肢が1つの選択は置かない＝決定2）。
+ */
+export function wizardVideoKinds(
+  recruitKey: boolean,
+  savedKind: VideoKind | undefined,
+  currentKind: VideoKind,
+): readonly VideoKind[] {
+  return recruitKey || savedKind === VIDEO_KIND.recruit || currentKind === VIDEO_KIND.recruit
+    ? [VIDEO_KIND.general, VIDEO_KIND.recruit]
+    : [VIDEO_KIND.general];
 }
