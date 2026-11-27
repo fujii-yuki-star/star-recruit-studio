@@ -117,6 +117,8 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     const plain = !e.shiftKey && !e.ctrlKey && !e.metaKey;
     const narrowOnClick = plain && selected.has(l.id) && selected.size > 1;
     if (!narrowOnClick) select(l, e);
+    // ⚠️ 錠は二重に守る＝操作を組み立てる側（layerOps の editable）も錠を除くので、ここを外しても動かない
+    //   （変異チェックで「同じ結果」と確かめた・2026-11-27）。ここは掴んだ手応えを出さないための入口。
     if (l.locked) {
       if (narrowOnClick) props.onSelect([l.id], l.id);
       return;
