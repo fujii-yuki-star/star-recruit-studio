@@ -122,7 +122,7 @@ describe("キーを動かす・消す（MV-0014 決定2）", () => {
     ]);
     expect(moveKeysOps(c, [pos(0)], 0)).toEqual([]);
     // 後ろへ追い越すと並びが替わる
-    const op = moveKeysOps(c, [pos(0)], 25)[0] as { patch: { transform: { position: { keyframes: Keyframe[] } } } };
+    const op = moveKeysOps(c, [pos(0)], 25)[0] as unknown as { patch: { transform: { position: { keyframes: Keyframe[] } } } };
     expect(op.patch.transform.position.keyframes.map((k) => k.frame)).toEqual([10, 20, 25]);
   });
 
