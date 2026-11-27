@@ -463,3 +463,55 @@ fn solid_layer_video(p: &mut Project) -> &mut Layer {
         .find(|l| l.layer_type == LayerType::Video)
         .unwrap()
 }
+
+/// MV-0013 決定2：両方のスイッチで、1コマの中の時刻（既定＝角 180・位相 −90・16）。
+#[test]
+fn モーションブラーの時刻() {
+    let mut p = minimal();
+    let c = &mut p.compositions[0];
+    c.layers[0].motion_blur = Some(true);
+    assert_eq!(
+        mv_core::eval::blur_times(c, &c.layers[0], 10.0),
+        None,
+        "コンポジションのスイッチが無い"
+    );
+    c.motion_blur = Some(CompositionMotionBlur {
+        enabled: true,
+        shutter_angle: None,
+        shutter_phase: None,
+        samples: None,
+    });
+    let t = mv_core::eval::blur_times(c, &c.layers[0], 10.0).unwrap();
+    assert_eq!(t.len(), 16);
+    // 10 − 0.25 から 10 + 0.25 の間を等しく（端の半分ずつ内側）
+    assert!((t[0] - (10.0 - 0.25 + 0.5 / 32.0)).abs() < 1e-12, "{t:?}");
+    assert!((t[15] - (10.0 + 0.25 - 0.5 / 32.0)).abs() < 1e-12, "{t:?}");
+    let mb = c.motion_blur.as_mut().unwrap();
+    mb.shutter_angle = Some(360.0);
+    mb.shutter_phase = Some(0.0);
+    mb.samples = Some(4);
+    assert_eq!(
+        mv_core::eval::blur_times(c, &c.layers[0], 3.0).unwrap(),
+        vec![3.125, 3.375, 3.625, 3.875]
+    );
+    // 角 0・どちらかのスイッチが切＝かからない
+    c.motion_blur.as_mut().unwrap().shutter_angle = Some(0.0);
+    assert_eq!(mv_core::eval::blur_times(c, &c.layers[0], 3.0), None);
+    c.motion_blur.as_mut().unwrap().shutter_angle = None;
+    c.motion_blur.as_mut().unwrap().enabled = false;
+    assert_eq!(mv_core::eval::blur_times(c, &c.layers[0], 3.0), None);
+    c.motion_blur.as_mut().unwrap().enabled = true;
+    c.layers[0].motion_blur = Some(false);
+    assert_eq!(mv_core::eval::blur_times(c, &c.layers[0], 3.0), None);
+    c.layers[0].motion_blur = None;
+    assert_eq!(mv_core::eval::blur_times(c, &c.layers[0], 3.0), None);
+    // 形の検査を通る（足した項目）・範囲の外は断る
+    c.layers[0].motion_blur = Some(true);
+    assert_eq!(codes(&p), vec![]);
+    let mut doc: serde_json::Value = serde_json::to_value(&p).unwrap();
+    doc["compositions"][0]["motionBlur"]["samples"] = serde_json::json!(65);
+    assert!(
+        parse_project(&doc.to_string()).is_err(),
+        "サンプルは 64 まで"
+    );
+}

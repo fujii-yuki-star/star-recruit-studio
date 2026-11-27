@@ -265,6 +265,27 @@ pub fn source_sec(comp: &Composition, layer: &Layer, frame: f64) -> Result<f64, 
     }
 }
 
+/// モーションブラーで重ねる時刻（MV-0013 決定2）。レイヤーとコンポジションの両方のスイッチが入っていなければ None。
+/// `frame + (位相 + 角 × (i + 0.5) ÷ 数) ÷ 360`（i = 0〜数−1）。角が 0 なら None（重ねる間が無い）。
+pub fn blur_times(comp: &Composition, layer: &Layer, frame: f64) -> Option<Vec<f64>> {
+    use crate::model::CompositionMotionBlur as B;
+    let mb = comp.motion_blur.as_ref().filter(|m| m.enabled)?;
+    if layer.motion_blur != Some(true) {
+        return None;
+    }
+    let angle = mb.shutter_angle.unwrap_or(B::DEFAULT_ANGLE);
+    if angle <= 0.0 {
+        return None;
+    }
+    let phase = mb.shutter_phase.unwrap_or(B::DEFAULT_PHASE);
+    let n = mb.samples.unwrap_or(B::DEFAULT_SAMPLES).max(1);
+    Some(
+        (0..n)
+            .map(|i| frame + (phase + angle * (f64::from(i) + 0.5) / f64::from(n)) / 360.0)
+            .collect(),
+    )
+}
+
 /// 親の変形まで掛けた「レイヤーの座標 → コンポジションの座標」（MV-0010 決定5＝AE の親子付け）。
 /// 子の変形 → 親の変形 → …（親の親まで）。⚠️ 不透明度は掛けない（親の不透明度は引き継がない）。
 /// 親が見える範囲の外でも、表示を切っていても、変形は効く。

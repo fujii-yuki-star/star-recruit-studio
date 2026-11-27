@@ -336,6 +336,41 @@
           "items": {
             "$ref": "#/$defs/Marker"
           }
+        },
+        "motionBlur": {
+          "$ref": "#/$defs/CompositionMotionBlur"
+        }
+      }
+    },
+    "CompositionMotionBlur": {
+      "description": "モーションブラー（MV-0013＝AE のコンポジションのスイッチと設定）。かかるのは、ここの enabled とレイヤーの motionBlur の両方が true のときだけ。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "AE の「モーションブラーを有効」。"
+        },
+        "shutterAngle": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 720,
+          "description": "シャッター角（度・既定 180）。1コマの何割の間を重ねるか（360＝1コマぶん）。"
+        },
+        "shutterPhase": {
+          "type": "number",
+          "minimum": -360,
+          "maximum": 360,
+          "description": "シャッターの位相（度・既定 −90）。重ねる間の始まり（−90＝そのコマの 1/4 コマ前から）。"
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 64,
+          "description": "1コマに重ねる数（既定 16）。"
         }
       }
     },
@@ -457,6 +492,10 @@
         "threeD": {
           "type": "boolean",
           "description": "2.5D（奥行きのある平面）として扱う（γ0.2 から）。"
+        },
+        "motionBlur": {
+          "type": "boolean",
+          "description": "モーションブラーのスイッチ（MV-0013＝AE のレイヤーの「M」）。コンポジションの motionBlur.enabled も true のときだけかかる。"
         },
         "transform": {
           "$ref": "#/$defs/Transform"

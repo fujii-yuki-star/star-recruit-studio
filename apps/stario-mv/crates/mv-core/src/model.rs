@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 /// この形式であることの目印。
 pub const FORMAT: &str = "stario-mv-project";
 /// この型が対応する schema の版。
-pub const SCHEMA_VERSION: &str = "0.1.0";
+pub const SCHEMA_VERSION: &str = "0.2.0";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -124,6 +124,31 @@ pub struct Composition {
     /// ⚠️ **先頭が最前面**（MV-0001 決定6）。
     pub layers: Vec<Layer>,
     pub markers: Vec<Marker>,
+    /// モーションブラー（MV-0013）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_blur: Option<CompositionMotionBlur>,
+}
+
+/// コンポジションのモーションブラー（MV-0013 決定1＝AE のスイッチと設定）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompositionMotionBlur {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shutter_angle: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shutter_phase: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub samples: Option<u32>,
+}
+
+impl CompositionMotionBlur {
+    /// シャッター角の既定（AE と同じ）。
+    pub const DEFAULT_ANGLE: f64 = 180.0;
+    /// シャッターの位相の既定（AE と同じ）。
+    pub const DEFAULT_PHASE: f64 = -90.0;
+    /// 1コマに重ねる数の既定（AE と同じ）。
+    pub const DEFAULT_SAMPLES: u32 = 16;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,6 +209,9 @@ pub struct Layer {
     pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub three_d: Option<bool>,
+    /// モーションブラーのスイッチ（MV-0013）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_blur: Option<bool>,
     pub transform: Transform,
     pub blend_mode: BlendMode,
     pub track_matte: Option<TrackMatte>,

@@ -105,6 +105,10 @@ fn blend(cb: vec3<f32>, cs: vec3<f32>, mode: u32) -> vec3<f32> {
 fn fs_layer(i: VOut) -> @location(0) vec4<f32> {
   let p = i.pos.xy;
   let back = textureLoad(backdrop, vec2<i32>(p), 0);
+  // 足す（モーションブラーの平均＝MV-0013）：同じ大きさの作業の色空間の絵を、重みを掛けてそのまま足す
+  if (u.mode == 100u) {
+    return back + textureLoad(content, vec2<i32>(p), 0) * u.opacity;
+  }
   let tp = vec2(u.m0.x * p.x + u.m0.z * p.y + u.m1.x, u.m0.y * p.x + u.m0.w * p.y + u.m1.y);
   let size = u.m1.zw;
   var src = vec4(0.0);
