@@ -93,6 +93,37 @@ pub fn trial_project(project: &Project, ops: &[Value]) -> Option<Project> {
     serde_json::from_value(doc).ok()
 }
 
+/// 値の欄が出す、動かせる値の場所（MV-0008 決定5）。⚠️ 画面の `src/edit/props.ts` の `ANIM_PATHS` と同じ並び。
+pub const ANIM_PATHS: &[&str] = &[
+    "/transform/anchor",
+    "/transform/position",
+    "/transform/scale",
+    "/transform/rotation",
+    "/transform/opacity",
+    "/shape/size",
+    "/shape/cornerRadius",
+];
+
+/// レイヤーの動かせる値を、そのフレームで求める（描画の核と同じ計算＝`mv_core::eval`・画面で書き写さない）。
+/// 答えは `{ "<場所>": 値 }`。その場所が無い・求められない（式など）ものは入れない。
+pub fn eval_values(layer: &Value, frame: i64) -> Value {
+    let mut out = serde_json::Map::new();
+    for path in ANIM_PATHS {
+        let Some(raw) = layer.pointer(path) else {
+            continue;
+        };
+        let Ok(a) = serde_json::from_value::<mv_core::model::Animatable>(raw.clone()) else {
+            continue;
+        };
+        if let Ok(v) = mv_core::eval::value_at(&a, frame as f64) {
+            if let Ok(j) = serde_json::to_value(v) {
+                out.insert((*path).to_string(), j);
+            }
+        }
+    }
+    Value::Object(out)
+}
+
 /// 画面が編集に使う、動画の全体と版。
 pub fn read(dir: &Path) -> Result<Value, String> {
     let (doc, revision) = mv_ops::read_doc(dir).map_err(|e| e.message)?;
@@ -211,6 +242,36 @@ mod tests {
         assert_eq!(
             e,
             "この操作は反映していません：outFrame は inFrame より大きく"
+        );
+    }
+
+    #[test]
+    fn 動かせる値をそのフレームで求める_キーの間は直線で_式と無い所は入れない() {
+        let layer = json!({
+            "transform": {
+                "position": { "keyframes": [
+                    { "frame": 10, "value": [0, 0], "interpolation": "linear" },
+                    { "frame": 20, "value": [100, 50], "interpolation": "linear" }
+                ] },
+                "rotation": { "value": 45 },
+                "opacity": { "expression": { "language": "javascript", "source": "time" } }
+            },
+            "shape": { "kind": "rectangle", "cornerRadius": { "value": 8 } }
+        });
+        let v = eval_values(&layer, 15);
+        assert_eq!(v["/transform/position"], json!([50.0, 25.0]));
+        assert_eq!(v["/transform/rotation"], json!(45.0));
+        assert_eq!(v["/shape/cornerRadius"], json!(8.0));
+        assert!(v.get("/transform/opacity").is_none(), "式は求めない");
+        assert!(v.get("/transform/anchor").is_none(), "無い所は入れない");
+        // キーの前後は端のキーの値
+        assert_eq!(
+            eval_values(&layer, 0)["/transform/position"],
+            json!([0.0, 0.0])
+        );
+        assert_eq!(
+            eval_values(&layer, 99)["/transform/position"],
+            json!([100.0, 50.0])
         );
     }
 

@@ -414,3 +414,110 @@ input:focus-visible {
   text-overflow: ellipsis;
   max-width: 40ch;
 }
+/* 値の欄（MV-0008 決定5） */
+.props-panel h3 {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 12px 0 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+}
+.prop-row.plain {
+  gap: 8px;
+}
+.prop-label {
+  flex: 0 0 80px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prop-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.stopwatch {
+  height: 20px;
+  min-width: 22px;
+  padding: 0 2px;
+  font-size: 12px;
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.55;
+}
+.stopwatch[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--accent);
+}
+.keynav {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+}
+.keynav button {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 3px;
+  font-size: 10px;
+}
+.keynav button[aria-pressed="true"] {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+/* 数の欄＝左右に掴んで動かす（AE の型） */
+.scrub {
+  color: var(--accent);
+  cursor: ew-resize;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px dotted var(--accent);
+  user-select: none;
+  white-space: nowrap;
+}
+.scrub.disabled {
+  color: var(--muted);
+  cursor: default;
+  border-bottom-color: transparent;
+}
+.scrub-input {
+  width: 72px;
+  height: 20px;
+  background: #272a31;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+}
+.props-panel textarea {
+  flex: 1;
+  min-width: 0;
+  background: #272a31;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+}
+.props-panel input[type="color"] {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+}
+/* キーのある時刻（帯の下の◆） */
+.tl-key {
+  position: absolute;
+  bottom: 1px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  background: var(--warn);
+  transform: rotate(45deg);
+  pointer-events: none;
+}

@@ -13,6 +13,7 @@ import {
   toggleOp,
   trimInOps,
   withTrial,
+  mergePatch,
   trimOutOps,
   trimToPlayheadOps,
 } from "./layerOps";
@@ -124,20 +125,30 @@ describe("分割・詰める・消す", () => {
 });
 
 describe("掴んでいる途中の帯の見え方", () => {
-  it("試しの時刻の変更だけを当て、元の並びと中身は変えない", () => {
+  it("試しの直す編集を順に当て（消す・並べ替えは当てない）、元は変えない", () => {
     const ls = [layer("A", 0, 10), layer("B", 10, 20)];
     const shown = withTrial(ls, [
       { op: "updateLayer", layerId: "B", patch: { inFrame: 15, outFrame: 25, startFrame: 15 } },
-      { op: "updateLayer", layerId: "B", patch: { name: "名前は見え方に使わない" } },
+      { op: "updateLayer", layerId: "B", patch: { name: "新" } },
       { op: "removeLayer", layerId: "A" },
+      { op: "moveLayer", layerId: "B", index: 0 },
     ]);
     expect(shown.map((l) => [l.id, l.inFrame, l.outFrame, l.startFrame, l.name])).toEqual([
       ["A", 0, 10, 0, "A"],
-      ["B", 15, 25, 15, "B"],
+      ["B", 15, 25, 15, "新"],
     ]);
     expect(ls[1].inFrame).toBe(10);
     // 片方の端だけ（切る）
     expect(withTrial(ls, [{ op: "updateLayer", layerId: "A", patch: { outFrame: 5 } }])[0]).toMatchObject({ inFrame: 0, outFrame: 5 });
+  });
+});
+
+describe("JSON Merge Patch（Rust の取引と同じ当て方）", () => {
+  it("null は消す・入れ子はまぜる・並びは置き換える・元は変えない", () => {
+    const t = { a: 1, b: { c: 2, d: 3 }, e: [1, 2] };
+    expect(mergePatch(t, { a: null, b: { c: 9 }, e: [3], f: { g: 1 } })).toEqual({ b: { c: 9, d: 3 }, e: [3], f: { g: 1 } });
+    expect(t).toEqual({ a: 1, b: { c: 2, d: 3 }, e: [1, 2] });
+    expect(mergePatch({ a: 1 }, { a: { b: null, c: 1 } })).toEqual({ a: { c: 1 } });
   });
 });
 
