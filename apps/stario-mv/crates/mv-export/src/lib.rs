@@ -453,7 +453,7 @@ pub fn remap_pcm(
     let n = src.len() / 2;
     let r = f64::from(rate);
     let mut out = vec![0.0f32; frames * 2];
-    for (i, o) in out.chunks_exact_mut(2).enumerate() {
+    for (i, o) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         let pos = sec_at(start_sec + i as f64 / r) * r;
         if !pos.is_finite() || pos < 0.0 || pos > (n.max(1) - 1) as f64 || n == 0 {
             continue;
