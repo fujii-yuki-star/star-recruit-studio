@@ -328,6 +328,16 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                 <button
                   type="button"
                   className="tl-toggle"
+                  aria-label="モーションブラー"
+                  aria-pressed={l.motionBlur === true}
+                  title="モーションブラー（コンポジションのスイッチも入っているときだけかかる）"
+                  onClick={() => props.onCommit([toggleOp(l, "motionBlur")])}
+                >
+                  M
+                </button>
+                <button
+                  type="button"
+                  className="tl-toggle"
                   aria-label="錠"
                   aria-pressed={l.locked}
                   title="錠（編集から守る）"

@@ -138,9 +138,18 @@ export function reorderOps(comp: Composition, id: string, to: number): Op[] {
 }
 
 /** 切り替え（目・ソロ・錠）と名前の変更。 */
-export function toggleOp(l: Layer, key: "enabled" | "solo" | "locked"): Op {
-  const now = key === "solo" ? l.solo === true : l[key];
+export function toggleOp(l: Layer, key: "enabled" | "solo" | "locked" | "motionBlur"): Op {
+  const now = key === "solo" || key === "motionBlur" ? l[key] === true : l[key];
   return { op: "updateLayer", layerId: l.id, patch: { [key]: !now } };
+}
+
+/** コンポジションのモーションブラーのスイッチ（MV-0013 決定4）。設定（角・位相・数）は残す。 */
+export function compBlurOp(comp: Composition): Op {
+  return {
+    op: "updateComposition",
+    compositionId: comp.id,
+    patch: { motionBlur: { enabled: comp.motionBlur?.enabled !== true } },
+  };
 }
 
 export function renameOp(l: Layer, name: string): Op | null {

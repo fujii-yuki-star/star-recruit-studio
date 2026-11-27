@@ -8,7 +8,7 @@ pub mod present;
 pub mod raster;
 pub mod text;
 
-use mv_core::eval::{invert, is_visible_at, mul, transform_at, Affine, EvalError};
+use mv_core::eval::{invert, is_visible_at, mul, transform_at, Affine, EvalError, IDENTITY};
 use mv_core::model::{
     AssetKind, AssetSource, BlendMode, Composition, LayerType, Project, WorkingColorSpace,
 };
@@ -147,6 +147,9 @@ struct LayerUniform {
     /// 1＝中身が既に作業の色空間・乗算済み（入れ子）＝読むときに直さない。
     src_working: u32,
 }
+
+/// 合成の「足す」（モーションブラーの平均＝MV-0013 決定3）。描画モードの番号と重ならない値。
+const ACCUMULATE: u32 = 100;
 
 const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const OUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -380,24 +383,206 @@ impl Renderer {
         // ⚠️ 先頭が最前面（MV-0001 決定6）＝描くのは末尾から
         for layer in shown_layers(comp, frame).into_iter().rev() {
             // 入れ子＝中を同じ描画の核で描き、作業の色空間の絵のまま重ねる（MV-0011 決定1）
-            if layer.layer_type == LayerType::Precomp {
-                if let Some((tex, iw, ih, m)) =
-                    self.precomp_content(project, comp, layer, frame, project_dir, linear, depth)?
-                {
-                    self.composite_texture(&tex, iw, ih, m, layer, frame, linear, true, &a, &b)?;
-                    std::mem::swap(&mut a, &mut b);
+            let (tex, cw, ch, m, src_working) = if layer.layer_type == LayerType::Precomp {
+                match self.precomp_content(
+                    project,
+                    comp,
+                    layer,
+                    frame,
+                    project_dir,
+                    linear,
+                    depth,
+                )? {
+                    Some((tex, iw, ih, m)) => (tex, iw, ih, m, true),
+                    None => continue,
                 }
-                continue;
-            }
-            let Some((content, m)) =
-                self.layer_content(project, comp, layer, frame, project_dir)?
-            else {
-                continue;
+            } else {
+                match self.layer_content(project, comp, layer, frame, project_dir)? {
+                    Some((content, m)) => (
+                        self.upload(&content),
+                        content.width,
+                        content.height,
+                        m,
+                        false,
+                    ),
+                    None => continue,
+                }
             };
-            self.composite_layer(&content, m, layer, frame, linear, &a, &b)?;
+            // モーションブラー（MV-0013）＝1コマの中の時刻の変形で描いて平均する
+            match mv_core::eval::blur_times(comp, layer, frame as f64) {
+                Some(times) => self.composite_blurred(
+                    &tex,
+                    cw,
+                    ch,
+                    m,
+                    comp,
+                    layer,
+                    frame,
+                    &times,
+                    linear,
+                    src_working,
+                    &a,
+                    &b,
+                )?,
+                None => self.composite_texture(
+                    &tex,
+                    cw,
+                    ch,
+                    m,
+                    layer,
+                    frame,
+                    linear,
+                    src_working,
+                    &a,
+                    &b,
+                )?,
+            }
             std::mem::swap(&mut a, &mut b);
         }
         Ok(a)
+    }
+
+    /// 作業の色空間の絵を置く入れ物（コンポジションの大きさ・最初は透明＝wgpu は 0 で埋める）。
+    fn accum_texture(&self, w: u32, h: u32, label: &str) -> wgpu::Texture {
+        self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: ACCUM_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    }
+
+    /// モーションブラー（MV-0013 決定2・決定3）：そのレイヤーだけを透明な地に各時刻の変形で描いて平均し、
+    /// 平均した絵（作業の色空間・乗算済み）に描画モードを1回だけ掛けて重ねる。動いていなければ1回で描く。
+    #[allow(clippy::too_many_arguments)]
+    fn composite_blurred(
+        &self,
+        tex: &wgpu::Texture,
+        cw: u32,
+        ch: u32,
+        m: Affine,
+        comp: &mv_core::model::Composition,
+        layer: &mv_core::model::Layer,
+        frame: i64,
+        times: &[f64],
+        linear: bool,
+        src_working: bool,
+        back: &wgpu::Texture,
+        out: &wgpu::Texture,
+    ) -> Result<(), RenderError> {
+        let f = frame as f64;
+        let w0 = mv_core::eval::world_matrix(comp, layer, f).map_err(RenderError::eval)?;
+        // 中身の画素 → レイヤーの座標（そのコマの変形を外したもの）
+        let local = match invert(w0) {
+            Some(i) => mul(i, m),
+            None => {
+                return self.composite_texture(
+                    tex,
+                    cw,
+                    ch,
+                    m,
+                    layer,
+                    frame,
+                    linear,
+                    src_working,
+                    back,
+                    out,
+                )
+            }
+        };
+        let mut samples = Vec::with_capacity(times.len());
+        for &t in times {
+            let wt = mv_core::eval::world_matrix(comp, layer, t).map_err(RenderError::eval)?;
+            let op = transform_at(&layer.transform, t)
+                .map_err(RenderError::eval)?
+                .opacity;
+            samples.push((mul(wt, local), op));
+        }
+        let op0 = samples[0].1;
+        if samples
+            .iter()
+            .all(|(mt, op)| *mt == samples[0].0 && *op == op0)
+        {
+            // 動いていない＝ぼかさない（そのコマの変形で1回）
+            return self.composite_texture(
+                tex,
+                cw,
+                ch,
+                m,
+                layer,
+                frame,
+                linear,
+                src_working,
+                back,
+                out,
+            );
+        }
+        let (w, h) = (comp.width, comp.height);
+        let clear = self.accum_texture(w, h, "blur-clear");
+        let single = self.accum_texture(w, h, "blur-single");
+        let mut acc = self.accum_texture(w, h, "blur-acc-a");
+        let mut next = self.accum_texture(w, h, "blur-acc-b");
+        let weight = 1.0 / samples.len() as f64;
+        for (mt, op) in &samples {
+            if invert(*mt).is_none() {
+                // その時刻は大きさが 0＝何も写らない（透明のまま平均に入る）
+                continue;
+            }
+            // そのレイヤーだけ（普通の重ね方・その時刻の不透明度）
+            self.draw(
+                tex,
+                cw,
+                ch,
+                *mt,
+                *op,
+                0,
+                linear,
+                src_working,
+                &layer.name,
+                frame,
+                &clear,
+                &single,
+            )?;
+            // 足して平均する
+            self.draw(
+                &single,
+                w,
+                h,
+                IDENTITY,
+                weight,
+                ACCUMULATE,
+                linear,
+                true,
+                &layer.name,
+                frame,
+                &acc,
+                &next,
+            )?;
+            std::mem::swap(&mut acc, &mut next);
+        }
+        // 平均した絵を、描画モードで1回（不透明度は各時刻で掛けた）
+        self.draw(
+            &acc,
+            w,
+            h,
+            IDENTITY,
+            1.0,
+            blend_id(layer.blend_mode),
+            linear,
+            true,
+            &layer.name,
+            frame,
+            back,
+            out,
+        )
     }
 
     /// 入れ子のレイヤーの中身（作業の色空間の絵・大きさ・中身の画素 → コンポジションの画素）。描くものが無ければ None。
@@ -681,16 +866,8 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn composite_layer(
-        &self,
-        content: &Content,
-        m: Affine,
-        layer: &mv_core::model::Layer,
-        frame: i64,
-        linear: bool,
-        back: &wgpu::Texture,
-        out: &wgpu::Texture,
-    ) -> Result<(), RenderError> {
+    /// 中身（乗算済み・sRGB の RGBA8）を GPU へ。
+    fn upload(&self, content: &Content) -> wgpu::Texture {
         let d = &self.gpu.device;
         let q = &self.gpu.queue;
         let tex = d.create_texture(&wgpu::TextureDescriptor {
@@ -726,18 +903,7 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.composite_texture(
-            &tex,
-            content.width,
-            content.height,
-            m,
-            layer,
-            frame,
-            linear,
-            false,
-            back,
-            out,
-        )
+        tex
     }
 
     /// 中身の絵（GPU）を、変換 `m` で重ねる。`src_working`＝中身が既に作業の色空間・乗算済み（入れ子＝MV-0011 決定1）。
@@ -755,21 +921,51 @@ impl Renderer {
         back: &wgpu::Texture,
         out: &wgpu::Texture,
     ) -> Result<(), RenderError> {
-        // コンポジションの画素 → 中身の画素
-        let inv = invert(m).ok_or_else(|| {
-            RenderError::Eval(format!(
-                "「{}」の大きさが 0 です（{frame} フレーム）",
-                layer.name
-            ))
-        })?;
         let opacity = transform_at(&layer.transform, frame as f64)
             .map_err(RenderError::eval)?
             .opacity;
+        self.draw(
+            tex,
+            cw,
+            ch,
+            m,
+            opacity,
+            blend_id(layer.blend_mode),
+            linear,
+            src_working,
+            &layer.name,
+            frame,
+            back,
+            out,
+        )
+    }
+
+    /// 中身の絵を、変換 `m`・不透明度・描画モード（[`blend_id`] か [`ACCUMULATE`]）で `back` に重ねて `out` へ。
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &self,
+        tex: &wgpu::Texture,
+        cw: u32,
+        ch: u32,
+        m: Affine,
+        opacity: f64,
+        mode: u32,
+        linear: bool,
+        src_working: bool,
+        name: &str,
+        frame: i64,
+        back: &wgpu::Texture,
+        out: &wgpu::Texture,
+    ) -> Result<(), RenderError> {
+        // コンポジションの画素 → 中身の画素
+        let inv = invert(m).ok_or_else(|| {
+            RenderError::Eval(format!("「{name}」の大きさが 0 です（{frame} フレーム）"))
+        })?;
         let u = LayerUniform {
             m0: [inv[0] as f32, inv[1] as f32, inv[2] as f32, inv[3] as f32],
             m1: [inv[4] as f32, inv[5] as f32, cw as f32, ch as f32],
             opacity: opacity as f32,
-            mode: blend_id(layer.blend_mode),
+            mode,
             linear: linear as u32,
             src_working: src_working as u32,
         };

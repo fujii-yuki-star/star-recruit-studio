@@ -49,6 +49,7 @@ fn blank(space: WorkingColorSpace) -> Project {
         background: [0.0, 0.0, 0.0, 1.0],
         layers: vec![],
         markers: vec![],
+        motion_blur: None,
     };
     Project {
         format: FORMAT.into(),
@@ -97,6 +98,7 @@ fn base_layer(t: LayerType) -> Layer {
         asset_id: None,
         composition_id: None,
         time_remap: None,
+        motion_blur: None,
         audio: None,
         text: None,
         shape: None,
@@ -798,4 +800,197 @@ fn 連番の映像はタイムリマップの秒のコマを見せ_範囲の外�
         px(&p, after)
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+fn pos_keys(keys: &[(i64, f64)]) -> Animatable {
+    Animatable {
+        keyframes: Some(
+            keys.iter()
+                .map(|&(frame, x)| Keyframe {
+                    frame,
+                    value: AnimValue::Vector(vec![x, 50.0]),
+                    interpolation: Interpolation::Linear,
+                    ease_out: None,
+                    ease_in: None,
+                    spatial_out: None,
+                    spatial_in: None,
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    }
+}
+
+/// 1コマに 50 画素動く白い 60×20（2 フレーム目は x＝70〜130）。
+fn moving(space: WorkingColorSpace, comp_on: bool, layer_on: bool) -> Project {
+    let mut p = blank(space);
+    let mut l = solid([1.0, 1.0, 1.0, 1.0], 60, 20);
+    l.transform.anchor = Animatable::vector(&[30.0, 10.0]);
+    l.transform.position = pos_keys(&[(0, 0.0), (4, 200.0)]);
+    l.motion_blur = Some(layer_on);
+    p.compositions[0].layers.push(l);
+    p.compositions[0].motion_blur = Some(CompositionMotionBlur {
+        enabled: comp_on,
+        shutter_angle: None,
+        shutter_phase: None,
+        samples: None,
+    });
+    p
+}
+
+/// MV-0013 決定2：両方のスイッチが入ったときだけ、1コマの中の時刻の変形を重ねる（既定＝前後 1/4 コマ＝±12.5 画素）。
+#[test]
+fn モーションブラーは両方のスイッチで動きの向きにぼける() {
+    for space in [WorkingColorSpace::Linear, WorkingColorSpace::Srgb] {
+        let f = render(&moving(space, true, true), 2).unwrap();
+        // 真ん中は全部の時刻で覆われる＝白のまま
+        assert!(
+            near(f.pixel(100, 50), [255, 255, 255, 255], 1),
+            "{space:?} {:?}",
+            f.pixel(100, 50)
+        );
+        // 止めて描いた端の外（x＝133）＝一部の時刻だけ覆う＝灰色
+        let g = f.pixel(133, 50)[0];
+        assert!((40..220).contains(&g), "{space:?} 端の外がぼける: {g}");
+        // 左右で同じだけ（位相 −90 ＝そのコマを真ん中に）
+        let l = f.pixel(66, 50)[0];
+        assert!(g.abs_diff(l) <= 2, "{space:?} 左 {l} 右 {g}");
+        // 重ねる間の外（x＝145）は黒
+        assert!(near(f.pixel(145, 50), [0, 0, 0, 255], 1));
+        // 縦にはぼけない
+        assert!(near(f.pixel(100, 38), [0, 0, 0, 255], 1));
+        // 片方のスイッチだけ＝ぼけない（端の外は黒）
+        for (c, l) in [(true, false), (false, true)] {
+            let f = render(&moving(space, c, l), 2).unwrap();
+            assert!(
+                near(f.pixel(133, 50), [0, 0, 0, 255], 1),
+                "{space:?} {c} {l}"
+            );
+        }
+    }
+}
+
+/// 動いていなければ、ぼかさずに描いたのと同じ絵。シャッター角 0 もぼけない。
+#[test]
+fn 動いていなければモーションブラーでも同じ絵() {
+    let mut p = moving(WorkingColorSpace::Linear, true, true);
+    p.compositions[0].layers[0].transform.position = Animatable::vector(&[100.0, 50.0]);
+    p.compositions[0].layers[0].transform.rotation = Animatable::number(17.0);
+    let a = render(&p, 2).unwrap();
+    p.compositions[0].layers[0].motion_blur = Some(false);
+    let b = render(&p, 2).unwrap();
+    assert_eq!(a.data, b.data);
+    let mut q = moving(WorkingColorSpace::Linear, true, true);
+    q.compositions[0]
+        .motion_blur
+        .as_mut()
+        .unwrap()
+        .shutter_angle = Some(0.0);
+    assert!(near(
+        render(&q, 2).unwrap().pixel(133, 50),
+        [0, 0, 0, 255],
+        1
+    ));
+}
+
+/// 入れ子の変形でもぼける＝直接描いたのと同じ（入れ子の絵は作業の色空間のまま平均する）。
+#[test]
+fn 入れ子もその変形でぼける() {
+    for space in [WorkingColorSpace::Linear, WorkingColorSpace::Srgb] {
+        let direct = render(&moving(space, true, true), 2).unwrap();
+        let mut p = moving(space, true, true);
+        let moved = p.compositions[0].layers.pop().unwrap();
+        let mut inner = p.compositions[0].clone();
+        inner.id = new_id(IdKind::Composition);
+        inner.motion_blur = None;
+        inner.background = [0.0, 0.0, 0.0, 0.0];
+        let mut still = moved.clone();
+        still.transform.position = Animatable::vector(&[100.0, 50.0]);
+        still.motion_blur = None;
+        inner.layers = vec![still];
+        let mut pre = base_layer(LayerType::Precomp);
+        pre.composition_id = Some(inner.id.clone());
+        pre.transform.anchor = Animatable::vector(&[100.0, 50.0]);
+        pre.transform.position = pos_keys(&[(0, 0.0), (4, 200.0)]);
+        pre.motion_blur = Some(true);
+        p.compositions[0].layers = vec![pre];
+        p.compositions.push(inner);
+        let f = render(&p, 2).unwrap();
+        for x in [66, 100, 133, 145] {
+            assert!(
+                near(f.pixel(x, 50), direct.pixel(x, 50), 2),
+                "{space:?} x={x} 入れ子 {:?} 直接 {:?}",
+                f.pixel(x, 50),
+                direct.pixel(x, 50)
+            );
+        }
+    }
+}
+
+/// 平均した絵には、描画モードを1回だけ・色を直さずに掛ける＝動きの真ん中（全部の時刻で覆う所）は、ぼかさずに描いたのと同じ色。
+/// ⚠️ 0 と 1 でない色・灰色の背景で（純色・黒だと描画モードや色の二重の直しが見えない＝変異チェックで生き残った）。
+#[test]
+fn ぼかしても真ん中は描画モードどおりの同じ色() {
+    for space in [WorkingColorSpace::Linear, WorkingColorSpace::Srgb] {
+        for mode in [BlendMode::Normal, BlendMode::Multiply] {
+            let mut p = moving(space, true, true);
+            p.compositions[0].background = [0.5, 0.5, 0.5, 1.0];
+            let l = &mut p.compositions[0].layers[0];
+            l.solid.as_mut().unwrap().color = [1.0, 0.5, 0.2, 1.0];
+            l.blend_mode = mode;
+            let blurred = render(&p, 2).unwrap().pixel(100, 50);
+            p.compositions[0].layers[0].motion_blur = Some(false);
+            let still = render(&p, 2).unwrap().pixel(100, 50);
+            assert!(
+                near(blurred, still, 2),
+                "{space:?} {mode:?} ぼかす {blurred:?} ぼかさない {still:?}"
+            );
+        }
+    }
+}
+
+/// 不透明度も時刻ごと（AE と同じ）＝動かずに不透明度だけ変わってもぼかしの計算に入る。直線なら平均＝そのコマの値。
+#[test]
+fn 不透明度は時刻ごとに掛ける() {
+    let mut p = moving(WorkingColorSpace::Srgb, true, true);
+    let l = &mut p.compositions[0].layers[0];
+    l.transform.position = Animatable::vector(&[100.0, 50.0]);
+    l.transform.opacity = Animatable {
+        keyframes: Some(vec![lin(0, 0.0), lin(4, 1.0)]),
+        ..Default::default()
+    };
+    let blurred = render(&p, 2).unwrap().pixel(100, 50);
+    p.compositions[0].layers[0].motion_blur = Some(false);
+    let still = render(&p, 2).unwrap().pixel(100, 50);
+    assert!(
+        near(blurred, still, 2),
+        "ぼかす {blurred:?} ぼかさない {still:?}"
+    );
+    assert!((100..160).contains(&still[0]), "半分の不透明度: {still:?}");
+}
+
+/// 重ねる時刻のどれかで大きさが 0 でも止まらない（その時刻は何も写らない）。
+#[test]
+fn 大きさが_0_になる時刻があっても描ける() {
+    let mut p = moving(WorkingColorSpace::Srgb, true, true);
+    let mb = p.compositions[0].motion_blur.as_mut().unwrap();
+    mb.shutter_angle = Some(720.0);
+    mb.shutter_phase = Some(0.0);
+    let hold = |frame, v: f64| Keyframe {
+        frame,
+        value: AnimValue::Vector(vec![v, v]),
+        interpolation: Interpolation::Hold,
+        ease_out: None,
+        ease_in: None,
+        spatial_out: None,
+        spatial_in: None,
+    };
+    // 1 フレーム目から 2 コマぶん重ねる＝2 フレーム目からは大きさ 0
+    p.compositions[0].layers[0].transform.scale = Animatable {
+        keyframes: Some(vec![hold(0, 1.0), hold(2, 0.0)]),
+        ..Default::default()
+    };
+    let f = render(&p, 1).expect("大きさ 0 の時刻があっても描ける");
+    let c = f.pixel(100, 50);
+    assert!(c[0] > 10 && c[0] < 250, "一部の時刻だけ写る: {c:?}");
 }
