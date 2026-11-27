@@ -31,7 +31,8 @@ export type EditKey =
   | "easeIn"
   | "easeOut"
   | "prevKey"
-  | "nextKey";
+  | "nextKey"
+  | "graph";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -51,6 +52,8 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (ctrl && e.altKey && !e.shiftKey && k === "t") return "timeRemap";
   // キーの補間（MV-0014 決定3・AE と同じ）＝Ctrl+Alt+H 止める・F9 イージーイーズ・Shift+F9 入り・Ctrl+Shift+F9 出
   if (ctrl && e.altKey && !e.shiftKey && k === "h") return "hold";
+  // グラフ＝Shift+F3（AE と同じ・MV-0015 決定1）
+  if (k === "F3" && e.shiftKey && !ctrl && !e.altKey) return "graph";
   if (k === "F9" && !e.altKey) return ctrl ? (e.shiftKey ? "easeOut" : null) : e.shiftKey ? "easeIn" : "easeBoth";
   if (ctrl && !e.shiftKey && k === "a") return "selectAll";
   if (ctrl && k === "]") return "forward";
@@ -87,6 +90,7 @@ export function editOps(
     | "easeOut"
     | "prevKey"
     | "nextKey"
+    | "graph"
   >,
   comp: Composition,
   selected: ReadonlySet<string>,

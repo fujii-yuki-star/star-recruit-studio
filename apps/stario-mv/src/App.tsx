@@ -16,8 +16,10 @@ import {
   revealAnimated,
   toggleHoldOps,
   toggleReveal,
+  type KeyPath,
   type Reveal,
 } from "./edit/keyframes";
+import type { GraphMode } from "./edit/GraphView";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -51,6 +53,10 @@ export function App(): React.JSX.Element {
   // レイヤー＋キーフレームの画面（MV-0014）＝開いているレイヤー・選んだキー（画面の好み＝保存しない）
   const [revealed, setRevealed] = useState<ReadonlyMap<string, Reveal>>(new Map());
   const [keyIds, setKeyIds] = useState<string[]>([]);
+  // イージングのグラフ（MV-0015）＝出すか・値か速さか・出す値（最後に押した値の行）
+  const [graphOn, setGraphOn] = useState(false);
+  const [graphMode, setGraphMode] = useState<GraphMode>("value");
+  const [graphTarget, setGraphTarget] = useState<{ layerId: string; path: KeyPath } | null>(null);
   // 吸着は既定で入（Premiere の型・MV-0008 決定4）
   const [snapping, setSnapping] = useState(true);
   // 素材の一覧から運んでいる素材（タイムラインへ落とすと置く＝MV-0008 決定4・7）
@@ -174,6 +180,7 @@ export function App(): React.JSX.Element {
           const ops = toggleTimeRemapOps(editComp, selected);
           if (ops.length > 0) void commit(ops);
         }
+        else if (edit === "graph") setGraphOn((v) => !v);
         else if (edit === "reveal") setRevealed((r) => revealAnimated(r, editComp, selected));
         else if (edit === "hold") void commit(toggleHoldOps(editComp, selectedKeys));
         else if (edit === "easeBoth") void commit(easeOps(editComp, selectedKeys, "both"));
@@ -411,6 +418,15 @@ export function App(): React.JSX.Element {
           <button
             type="button"
             disabled={!editComp}
+            aria-pressed={graphOn}
+            onClick={() => setGraphOn((v) => !v)}
+            title="帯の場所をイージングのグラフにする（Shift+F3）＝値の行を押すとその値が出る"
+          >
+            グラフ
+          </button>
+          <button
+            type="button"
+            disabled={!editComp}
             aria-label="コンポジションのモーションブラー"
             aria-pressed={editComp?.motionBlur?.enabled === true}
             onClick={() => editComp && commit([compBlurOp(editComp)])}
@@ -479,6 +495,8 @@ export function App(): React.JSX.Element {
             onToggleReveal={(id) => setRevealed((r) => toggleReveal(r, id))}
             selectedKeys={selectedKeyIds}
             onSelectKeys={setKeyIds}
+            graph={graphOn ? { target: graphTarget, mode: graphMode, onMode: setGraphMode } : undefined}
+            onGraphTarget={setGraphTarget}
             onDropAsset={(f) => {
               if (dragAsset) void commit([placeAssetOp(dragAsset, f, compId)]);
             }}

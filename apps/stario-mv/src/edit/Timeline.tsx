@@ -28,6 +28,7 @@ import {
   type Reveal,
 } from "./keyframes";
 import type { Composition, Layer, Op } from "./types";
+import { GraphView, type GraphMode } from "./GraphView";
 
 /** 行の高さ・名前の列の幅・目盛りの高さ（画素）。 */
 export const ROW_H = 26;
@@ -64,6 +65,10 @@ export interface TimelineProps {
   /** 選んだキー（`keyId` の名前・MV-0014 決定2）。 */
   selectedKeys?: ReadonlySet<string>;
   onSelectKeys?: (ids: string[]) => void;
+  /** グラフ（MV-0015）＝あれば帯の場所をグラフにする。`target`＝出す値（最後に押した値の行）。 */
+  graph?: { target: { layerId: string; path: KeyPath } | null; mode: GraphMode; onMode: (m: GraphMode) => void };
+  /** 値の行（名前か◆）を押した＝グラフに出す値。 */
+  onGraphTarget?: (t: { layerId: string; path: KeyPath }) => void;
 }
 
 /** 行＝レイヤーの行か、開いたレイヤーの値の行（`li`＝レイヤーの並びの番号）。 */
@@ -247,6 +252,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     if (e.button !== 0) return;
     e.stopPropagation();
     const id = keyId({ layerId: l.id, path, frame });
+    props.onGraphTarget?.({ layerId: l.id, path });
     // Ctrl を押しながら＝直線に戻す（AE の型・MV-0014 決定3）。選択は Shift で足す・外す
     if (e.ctrlKey || e.metaKey) {
       const ops = toLinearOps(comp, [{ layerId: l.id, path, frame }]);
@@ -405,7 +411,11 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
                 style={{ top: RULER_H + ri * ROW_H, height: ROW_H }}
                 data-testid={`prop-row-${l.id}-${row.path}`}
               >
-                <div className="tl-name tl-prop-name" style={{ width: NAME_W }}>
+                <div
+                  className="tl-name tl-prop-name"
+                  style={{ width: NAME_W }}
+                  onPointerDown={() => props.onGraphTarget?.({ layerId: l.id, path: row.path })}
+                >
                   <span className="tl-label">{label}</span>
                 </div>
                 <div
@@ -575,6 +585,40 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
             </div>
           );
         })}
+        {props.graph && (
+          <div
+            className="tl-graph"
+            style={{ left: NAME_W, top: view.top + RULER_H, width: width - NAME_W, height: Math.max(80, view.height - RULER_H) }}
+          >
+            {(() => {
+              const t = props.graph.target;
+              const l = t && shown.find((x) => x.id === t.layerId);
+              const base = t && layers.find((x) => x.id === t.layerId);
+              return l && base && t && keysAt(base, t.path).length > 0 ? (
+                <GraphView
+                  layer={l}
+                  base={base}
+                  path={t.path}
+                  fps={comp.fps.num / comp.fps.den}
+                  ppf={ppf}
+                  durationFrames={comp.durationFrames}
+                  height={Math.max(80, view.height - RULER_H)}
+                  mode={props.graph.mode}
+                  onMode={props.graph.onMode}
+                  onTrial={props.onTrial}
+                  onCommit={(ops) => {
+                    setSettling({ base: layers, ops });
+                    void Promise.resolve(props.onCommit(ops)).then((ok) => {
+                      if (ok === false) setSettling(null);
+                    });
+                  }}
+                />
+              ) : (
+                <p className="muted graph-empty">キーフレームのある値の行（名前か◆）を押すと、ここにグラフが出ます。</p>
+              );
+            })()}
+          </div>
+        )}
         <div className="tl-playhead" data-testid="playhead" style={{ left: NAME_W + head }} />
         {props.assetDragging && dropAt != null && (
           <div className="tl-drop" data-testid="drop-line" style={{ left: NAME_W + frameToX(dropAt, ppf) }} />
