@@ -533,6 +533,7 @@ fn remapped_wav(
         sec_at(t).unwrap_or(f64::NAN)
     });
     std::fs::create_dir_all(&dir).map_err(ExportError::Io)?;
+    sweep_old(&dir, REMAP_KEEP);
     // 書きかけを読まれないよう、別の名前に書いてから置き換える
     let tmp = dir.join(format!(
         "{:016x}.{}.writing",
@@ -548,6 +549,30 @@ fn remapped_wav(
         }
     }
     Ok(path.display().to_string())
+}
+
+/// タイムリマップの一時の音を残す長さ（これより前に作ったものは、次に作るときに消す）。
+pub const REMAP_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// `dir` の中の、`keep` より前に作った一時の音（`.wav`・書きかけ）を消す。消せなくても止めない（使っている途中かもしれない）。
+pub fn sweep_old(dir: &Path, keep: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for e in entries.flatten() {
+        let p = e.path();
+        let ours = p.extension().is_some_and(|x| x == "wav" || x == "writing");
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > keep);
+        if ours && old {
+            std::fs::remove_file(&p).ok();
+        }
+    }
 }
 
 /// 入れ子の中の音を外の時刻へ置き直す（`offset` だけ後ろへ・外の `lo`〜`hi` 秒で切る・`gain_db` を足す）。範囲に入らなければ None。
@@ -703,6 +728,25 @@ mod tests {
         assert_eq!(remap_pcm(&src, r, 0.0, 1, |_| 0.4), vec![4.0, 40.0]);
         // 空の素材は無音
         assert_eq!(remap_pcm(&[], r, 0.0, 2, |t| t), vec![0.0; 4]);
+    }
+
+    #[test]
+    fn 古い一時の音だけ消す() {
+        let dir = std::env::temp_dir().join(format!("mv-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["a.wav", "b.x.writing", "keep.txt"] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+        }
+        // まだ新しい＝消さない
+        super::sweep_old(&dir, std::time::Duration::from_secs(3600));
+        assert!(dir.join("a.wav").is_file());
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        // 残す長さを過ぎた＝一時の音と書きかけだけ消す（他のファイルは触らない）
+        super::sweep_old(&dir, std::time::Duration::from_millis(10));
+        assert!(!dir.join("a.wav").exists());
+        assert!(!dir.join("b.x.writing").exists());
+        assert!(dir.join("keep.txt").is_file());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
