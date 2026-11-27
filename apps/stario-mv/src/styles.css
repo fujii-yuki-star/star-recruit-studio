@@ -605,4 +605,29 @@ input:focus-visible {
   background: #6b4a7a;
   border-color: #a77ac0;
 }
+/* レイヤー＋キーフレームの画面（MV-0014） */
+.tl-prop .tl-name {
+  padding-left: 28px;
+  color: var(--muted, #9aa0aa);
+}
+.tl-kf {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  background: var(--warn);
+  transform: rotate(45deg);
+  cursor: ew-resize;
+}
+.tl-kf.kf-hold {
+  transform: none;
+}
+.tl-kf.kf-bezier {
+  border-radius: 50%;
+  transform: none;
+}
+.tl-kf.selected {
+  outline: 2px solid #fff;
+}
 

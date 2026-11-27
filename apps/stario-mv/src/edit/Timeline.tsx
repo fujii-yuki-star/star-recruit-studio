@@ -13,6 +13,19 @@ import {
 } from "./layerOps";
 import { fitPxPerFrame, frameToX, snapOffset, snapTargets, xToFrame, zoomed } from "./timelineMath";
 import { keyFramesOf } from "./props";
+import {
+  clickKey,
+  keyId,
+  keysAt,
+  liveKeys,
+  moveKeysOps,
+  movedKeyIds,
+  pathLabel,
+  propRowsFor,
+  type KeyPath,
+  type KeyRef,
+  type Reveal,
+} from "./keyframes";
 import type { Composition, Layer, Op } from "./types";
 
 /** 行の高さ・名前の列の幅・目盛りの高さ（画素）。 */
@@ -43,7 +56,19 @@ export interface TimelineProps {
   assetDragging?: boolean;
   /** 素材を落とした時刻。 */
   onDropAsset?: (frame: number) => void;
+  /** 開いているレイヤーと開き方（MV-0014 決定1＝▸は全部・`U` はキーのある値だけ）。 */
+  revealed?: ReadonlyMap<string, Reveal>;
+  /** ▸を押した（開く・閉じる）。 */
+  onToggleReveal?: (layerId: string) => void;
+  /** 選んだキー（`keyId` の名前・MV-0014 決定2）。 */
+  selectedKeys?: ReadonlySet<string>;
+  onSelectKeys?: (ids: string[]) => void;
 }
+
+/** 行＝レイヤーの行か、開いたレイヤーの値の行（`li`＝レイヤーの並びの番号）。 */
+type Row = { kind: "layer"; l: Layer; li: number } | { kind: "prop"; l: Layer; li: number; path: KeyPath };
+
+const NO_KEYS: ReadonlySet<string> = new Set();
 
 type Drag =
   | {
@@ -55,7 +80,19 @@ type Drag =
       /** 選んでいるものの1つを押した＝動かさずに離したら、それだけを選び直す（AE の型）。 */
       narrowOnClick: boolean;
     }
-  | { kind: "order"; id: string; y0: number; from: number; to: number; moved: boolean };
+  | { kind: "order"; id: string; y0: number; from: number; fromRow: number; to: number; moved: boolean }
+  | {
+      kind: "keys";
+      x0: number;
+      /** 掴んだキーのフレーム（吸着の基準）。 */
+      grab: number;
+      keys: KeyRef[];
+      delta: number;
+      moved: boolean;
+      ops: Op[];
+      /** 選んでいるキーの1つを素で押した＝動かさずに離したら、それだけを選び直す。 */
+      narrowTo: string | null;
+    };
 
 /**
  * タイムライン（MV-0008 決定3・4）＝左にレイヤーの名前と切り替え、右に時間の目盛りと帯・今の時刻の線。
@@ -129,8 +166,19 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
         ? settling.ops
         : null;
   const shown = pending ? withTrial(layers, pending) : layers;
+  // 行＝レイヤーの行＋開いたレイヤーの値の行（MV-0014 決定1）
+  const rows: Row[] = [];
+  shown.forEach((l, li) => {
+    rows.push({ kind: "layer", l, li });
+    const how = props.revealed?.get(l.id);
+    if (how) for (const path of propRowsFor(l, how)) rows.push({ kind: "prop", l, li, path });
+  });
+  const selectedKeys = props.selectedKeys ?? NO_KEYS;
+  // 掴んで動かしている途中は、選んだキーを動かした先で見せる
+  const keySel =
+    drag?.kind === "keys" && drag.moved ? new Set(movedKeyIds(comp, drag.keys, drag.delta)) : selectedKeys;
   const first = Math.max(0, Math.floor((view.top - RULER_H) / ROW_H) - OVERSCAN);
-  const last = Math.min(layers.length, Math.ceil((view.top + view.height) / ROW_H) + OVERSCAN);
+  const last = Math.min(rows.length, Math.ceil((view.top + view.height) / ROW_H) + OVERSCAN);
   const width = NAME_W + frameToX(comp.durationFrames, ppf) + 40;
 
   const select = (l: Layer, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): void => {
@@ -186,11 +234,33 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   };
 
   // ── 名前の列を掴んで上下へ（重なりの順） ──
-  const startName = (e: React.PointerEvent, l: Layer, index: number): void => {
+  const startName = (e: React.PointerEvent, l: Layer, index: number, row: number): void => {
     if (e.button !== 0 || renaming === l.id) return;
     if ((e.target as HTMLElement).closest("button, input")) return;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    setDrag({ kind: "order", id: l.id, y0: e.clientY, from: index, to: index, moved: false });
+    setDrag({ kind: "order", id: l.id, y0: e.clientY, from: index, fromRow: row, to: index, moved: false });
+  };
+
+  // ── キーを押す・掴んで左右へ（MV-0014 決定2） ──
+  const startKey = (e: React.PointerEvent, l: Layer, path: KeyPath, frame: number): void => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const id = keyId({ layerId: l.id, path, frame });
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    const next = clickKey(selectedKeys, id, additive);
+    props.onSelectKeys?.(next);
+    if (additive || l.locked) return;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDrag({
+      kind: "keys",
+      x0: e.clientX,
+      grab: frame,
+      keys: liveKeys(comp, next),
+      delta: 0,
+      moved: false,
+      ops: [],
+      narrowTo: selectedKeys.has(id) && selectedKeys.size > 1 ? id : null,
+    });
   };
 
   const onMove = (e: React.PointerEvent): void => {
@@ -200,8 +270,20 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     }
     if (!drag) return;
     if (drag.kind === "order") {
-      const to = Math.max(0, Math.min(layers.length - 1, drag.from + Math.round((e.clientY - drag.y0) / ROW_H)));
+      // 行の数で数える（開いた値の行があっても、その下のレイヤーの位置へ）
+      const r = Math.max(0, Math.min(rows.length - 1, drag.fromRow + Math.round((e.clientY - drag.y0) / ROW_H)));
+      const to = rows[r]?.li ?? drag.from;
       if (to !== drag.to || !drag.moved) setDrag({ ...drag, to, moved: drag.moved || to !== drag.from });
+      return;
+    }
+    if (drag.kind === "keys") {
+      const df = xToFrame(e.clientX - drag.x0, ppf);
+      const delta = df + (snapping ? snapOffset([drag.grab + df], [playhead], ppf) : 0);
+      const ops = moveKeysOps(comp, drag.keys, delta);
+      if (delta !== drag.delta || !drag.moved) {
+        props.onTrial(ops.length > 0 ? ops : null);
+        setDrag({ ...drag, delta, ops, moved: true });
+      }
       return;
     }
     const ops = barOps(drag, e.clientX);
@@ -225,6 +307,21 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       if (!d.moved && l) select(l, e);
       const ops = reorderOps(comp, d.id, d.to);
       if (ops.length > 0) props.onCommit(ops);
+      return;
+    }
+    if (d.kind === "keys") {
+      if (d.ops.length > 0) {
+        setSettling({ base: layers, ops: d.ops });
+        // 選択も動かした先へ付け替える
+        props.onSelectKeys?.(movedKeyIds(comp, d.keys, d.delta));
+        void Promise.resolve(props.onCommit(d.ops)).then((ok) => {
+          if (ok === false) {
+            setSettling(null);
+            props.onSelectKeys?.(d.keys.map(keyId));
+          }
+        });
+      } else if (d.moved) props.onTrial(null);
+      else if (d.narrowTo) props.onSelectKeys?.([d.narrowTo]);
       return;
     }
     if (d.ops.length > 0) {
@@ -258,7 +355,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       onPointerCancel={onUp}
       onPointerLeave={() => setDropAt(null)}
     >
-      <div className="tl-inner" style={{ width, height: RULER_H + layers.length * ROW_H }}>
+      <div className="tl-inner" style={{ width, height: RULER_H + rows.length * ROW_H }}>
         <div className="tl-ruler-row" style={{ height: RULER_H }}>
           <div className="tl-corner" style={{ width: NAME_W }}>
             {layers.length} レイヤー
@@ -288,23 +385,75 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
             ))}
           </div>
         </div>
-        {shown.slice(first, last).map((l, k) => {
-          const i = first + k;
+        {rows.slice(first, last).map((row, k) => {
+          const ri = first + k;
+          const l = row.l;
+          if (row.kind === "prop") {
+            const label = pathLabel(l, row.path);
+            return (
+              <div
+                key={`${l.id}|${row.path}`}
+                className="tl-row tl-prop"
+                style={{ top: RULER_H + ri * ROW_H, height: ROW_H }}
+                data-testid={`prop-row-${l.id}-${row.path}`}
+              >
+                <div className="tl-name tl-prop-name" style={{ width: NAME_W }}>
+                  <span className="tl-label">{label}</span>
+                </div>
+                <div
+                  className="tl-track"
+                  onPointerDown={(e) => {
+                    // 何も無い所を押す＝キーの選択を外す
+                    if (e.button === 0 && e.target === e.currentTarget) props.onSelectKeys?.([]);
+                  }}
+                >
+                  {keysAt(l, row.path).map((kf) => {
+                    const id = keyId({ layerId: l.id, path: row.path, frame: kf.frame });
+                    return (
+                      <span
+                        key={kf.frame}
+                        role="button"
+                        className={`tl-kf kf-${kf.interpolation}${keySel.has(id) ? " selected" : ""}`}
+                        data-testid={`kf-${l.id}-${row.path}-${kf.frame}`}
+                        aria-label={`${label}のキー（${kf.frame}）`}
+                        aria-pressed={keySel.has(id)}
+                        title={`${label}のキー（${kf.frame}）＝押して選ぶ・掴んで動かす・Delete で消す`}
+                        style={{ left: frameToX(kf.frame, ppf) }}
+                        onPointerDown={(e) => startKey(e, l, row.path, kf.frame)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
+          const i = row.li;
           const isSel = selected.has(l.id);
           const dropTarget = drag?.kind === "order" && drag.moved && drag.to === i && drag.id !== l.id;
+          const how = props.revealed?.get(l.id);
           return (
             <div
               key={l.id}
               className={`tl-row${isSel ? " selected" : ""}${dropTarget ? " drop" : ""}`}
-              style={{ top: RULER_H + i * ROW_H, height: ROW_H }}
+              style={{ top: RULER_H + ri * ROW_H, height: ROW_H }}
               data-testid={`row-${l.id}`}
             >
               <div
                 className="tl-name"
                 style={{ width: NAME_W }}
-                onPointerDown={(e) => startName(e, l, i)}
+                onPointerDown={(e) => startName(e, l, i, ri)}
                 onDoubleClick={() => setRenaming(l.id)}
               >
+                <button
+                  type="button"
+                  className="tl-toggle tl-twirl"
+                  aria-label={`${l.name}の値を開く`}
+                  aria-expanded={how != null}
+                  title="値の行を開く・閉じる（U＝キーフレームのある値だけ）"
+                  onClick={() => props.onToggleReveal?.(l.id)}
+                >
+                  {how ? "▾" : "▸"}
+                </button>
                 <button
                   type="button"
                   className="tl-toggle"
