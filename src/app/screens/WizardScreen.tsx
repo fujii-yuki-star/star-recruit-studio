@@ -10,7 +10,8 @@ import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../
 import { useProjectStore } from "../store/projectStore";
 import { describingIn } from "../store/assetDescribeQueue";
 import { WIZARD_VOICE_LABEL, DESCRIBING_LABEL, describingRemainMessage, describingWaitingMessage, droppedRejectMessage, MAKE_WITHOUT_WAIT_LABEL, ORIENTATION_LABEL, VIDEO_KIND_LABEL, WAIT_DESCRIBE_LABEL } from "../uiLabels";
-import { stepsFor, WIZARD_STEP, wizardBackLabel } from "./wizardSteps";
+import { stepsFor, WIZARD_STEP, wizardBackLabel, wizardVideoKinds } from "./wizardSteps";
+import { isPackFeatureEnabled, PACK_FEATURE } from "../../domain/pack/extensionPack";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -32,11 +33,12 @@ interface WizardProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
-// 動画の種類（ADR-0011）。表示名は正典 06§3。目的の選択肢はこの種類で切り替わる。
-const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
-  { id: VIDEO_KIND.recruit, label: VIDEO_KIND_LABEL[VIDEO_KIND.recruit], desc: "会社・仕事の魅力を求職者に伝える" },
-  { id: VIDEO_KIND.general, label: VIDEO_KIND_LABEL[VIDEO_KIND.general], desc: "社内発表・報告・製品紹介など" },
-];
+// 動画の種類（ADR-0011）の説明。表示名は正典 06§3。目的の選択肢はこの種類で切り替わる。
+// ⚠️ **出すかどうかと並びは `wizardVideoKinds`**（ADR-0076＝採用動画は拡張パックの鍵で出す・一般が先）。
+const VIDEO_KIND_DESC: Record<VideoKind, string> = {
+  [VIDEO_KIND.general]: "社内発表・報告・製品紹介など",
+  [VIDEO_KIND.recruit]: "会社・仕事の魅力を求職者に伝える",
+};
 
 // 画面の向き（ADR-0012）。横型＝従来、縦型＝スマホ向け。寸法は videoSettings.aspectRatio から導出（§2-7）。
 const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
@@ -44,11 +46,14 @@ const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
   { id: ORIENTATION.portrait, label: ORIENTATION_LABEL[ORIENTATION.portrait], desc: "スマホ・ショート動画向け" },
 ];
 
+// ⚠️ **種類を選ばせないときは「種類」に触れない**（ADR-0076 決定2・6）。
+const kindStepAdvice = (kindChoice: boolean): string[] =>
+  kindChoice
+    ? ["まずは、動画の種類と目的を選びましょう。", "種類や目的に合わせて、わたしが構成のたたき台を考えます。"]
+    : ["まずは、動画の目的を選びましょう。", "目的に合わせて、わたしが構成のたたき台を考えます。"];
+
+// 採用動画のときの助言（一般の発表内容の段は `generalStep1Advice`）。⚠️ 採用の言葉（求職者）は採用だけ（ADR-0076 決定6）。
 const yukoAdvice: Record<number, string[]> = {
-  [WIZARD_STEP.kind]: [
-    "まずは、動画の種類と目的を選びましょう。",
-    "種類や目的に合わせて、わたしが構成のたたき台を考えます。",
-  ],
   [WIZARD_STEP.brief]: [
     "会社情報は、あとからでも直せます。分かるところだけ入れてくださいね。",
     "「アピールしたいこと」は、求職者に伝えたい魅力を短く書くのがおすすめです。",
@@ -69,10 +74,17 @@ const generalStep1Advice = [
   "伝えたい要点を箇条書きにすると、AIが分かりやすくまとめます。",
 ];
 
-function adviceFor(step: number, videoKind: VideoKind): string[] {
+function adviceFor(step: number, videoKind: VideoKind, kindChoice: boolean): string[] {
+  if (step === WIZARD_STEP.kind) return kindStepAdvice(kindChoice);
   if (step === WIZARD_STEP.brief && videoKind === VIDEO_KIND.general) return generalStep1Advice;
   return yukoAdvice[step] ?? [];
 }
+
+// 写真・動画の段の説明。⚠️ 「会社の写真」は採用動画の言い方＝一般では出さない（ADR-0076 決定6）。
+const MATERIALS_DESC: Record<VideoKind, string> = {
+  [VIDEO_KIND.general]: "写真や動画を追加すると、動画がより分かりやすく、魅力的になります。",
+  [VIDEO_KIND.recruit]: "会社の写真や動画を追加すると、動画がより魅力的になります。",
+};
 
 export function WizardScreen({ onNavigate }: WizardProps) {
   // ステップは store に保持した値から開く（#401）：サイドバー離脱→復帰や confirm「キャンセル」で
@@ -84,7 +96,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const initialMeta = useProjectStore.getState().meta;
   const c0 = initialMeta.companyInfo;
   const g0 = initialMeta.generalBrief;
-  const [videoKind, setVideoKind] = useState<VideoKind>(initialMeta.videoKind ?? VIDEO_KIND.recruit);
+  // ⚠️ 種類が無いときは一般（ADR-0076 決定4・5＝新しい動画は一般が選ばれた状態で始まる）。
+  //   古い文書（種類の無い 1.0）は読み込みの移行で採用になっているので、ここには来ない。
+  const [videoKind, setVideoKind] = useState<VideoKind>(initialMeta.videoKind ?? VIDEO_KIND.general);
+  // 開いたときの保存済みの種類＝採用動画のカードを出し続ける根拠（ADR-0076 決定3＝鍵が無くても見直せる・切り替えて戻せる）。
+  const [savedKind] = useState<VideoKind | undefined>(initialMeta.videoKind);
   const [purpose, setPurpose] = useState<Purpose>(initialMeta.purpose);
   const [aspectRatio, setAspectRatio] = useState<Orientation>(initialMeta.videoSettings.aspectRatio);
   const [companyName, setCompanyName] = useState(c0?.companyName ?? "");
@@ -114,7 +130,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const { assets, describingKeys, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, saveBlockedReason, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
-  const steps = stepsFor(videoKind);
+  // 採用動画を新しく作る入口は拡張パックの鍵で出す（ADR-0076 決定1・2）。
+  const recruitKey = useProjectStore((st) => isPackFeatureEnabled(st.packs, PACK_FEATURE.recruitVideo));
+  const kindOptions = wizardVideoKinds(recruitKey, savedKind, videoKind);
+  const kindChoice = kindOptions.length > 1;
+  const steps = stepsFor(videoKind, kindChoice);
 
   // 入力を始めたら、このパソコンの中で動画案を作る部品を裏で起動しておく（ADR-0052 決定6・#1293）＝「作る」を押してからの
   // 起動と照合の待ちを、入力している間に済ませる。待たない・失敗しても何も出さない（押したときに同じ起動をもう一度試す）。
@@ -285,26 +305,29 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             {step === WIZARD_STEP.kind && (
               <>
                 <h2 className="section-title">どんな動画を作りますか？</h2>
-                {/* 動画の種類（採用/一般）。選ぶと下の「目的」の選択肢が切り替わる（ADR-0011）。 */}
-                <div className="card-grid cols-2">
-                  {videoKindOptions.map((opt) => (
-                    <button
-                      key={opt.id}
-                      className="action-card"
-                      // 選択中は色だけでなく aria-pressed でも伝える（キーボード/読み上げ・#412）
-                      aria-pressed={videoKind === opt.id}
-                      style={{
-                        borderColor: videoKind === opt.id ? "var(--color-primary)" : undefined,
-                        background: videoKind === opt.id ? "var(--color-primary-soft)" : undefined,
-                      }}
-                      onClick={() => changeVideoKind(opt.id)}
-                    >
-                      <span className="action-card-title">{opt.label}</span>
-                      <span className="action-card-desc">{opt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                <h3 className="field-label mt-lg">目的</h3>
+                {/* 動画の種類（一般/採用）。選ぶと下の「目的」の選択肢が切り替わる（ADR-0011）。
+                    ⚠️ 選べる種類が1つなら出さない（ADR-0076 決定2＝採用動画は拡張パックの鍵で出す）。 */}
+                {kindChoice && (
+                  <div className="card-grid cols-2" data-testid="wizard-video-kinds">
+                    {kindOptions.map((id) => (
+                      <button
+                        key={id}
+                        className="action-card"
+                        // 選択中は色だけでなく aria-pressed でも伝える（キーボード/読み上げ・#412）
+                        aria-pressed={videoKind === id}
+                        style={{
+                          borderColor: videoKind === id ? "var(--color-primary)" : undefined,
+                          background: videoKind === id ? "var(--color-primary-soft)" : undefined,
+                        }}
+                        onClick={() => changeVideoKind(id)}
+                      >
+                        <span className="action-card-title">{VIDEO_KIND_LABEL[id]}</span>
+                        <span className="action-card-desc">{VIDEO_KIND_DESC[id]}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <h3 className={`field-label${kindChoice ? " mt-lg" : ""}`}>目的</h3>
                 <div className="card-grid cols-2">
                   {currentPurposeOptions.map((opt) => (
                     <button
@@ -640,9 +663,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             {step === WIZARD_STEP.materials && (
               <>
                 <h2 className="section-title">写真・動画を追加</h2>
-                <p className="page-desc mb">
-                  会社の写真や動画を追加すると、動画がより魅力的になります。
-                </p>
+                <p className="page-desc mb">{MATERIALS_DESC[videoKind]}</p>
                 <label
                   {...assetPicker.labelProps}
                   className="card-tight text-center"
@@ -842,7 +863,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           </div>
         </div>
 
-        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} pose="guide" />
+        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind, kindChoice)} pose="guide" />
       </div>
     </div>
   );

@@ -405,7 +405,8 @@ export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, pu
     case "ready": return canAddScene
       ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
       : `場面を作ると、${purpose}。`;
-    case "idle": return "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。";
+    // ⚠️ **動画の種類に寄せない**（ADR-0076 決定6）＝本体は一般向け。「会社情報」は採用動画の言葉。
+    case "idle": return "「新しい動画を作る」から、伝えたいことと素材を入れて動画案を作成しましょう。";
   }
 }
 
@@ -2298,6 +2299,8 @@ export function packRemoveConfirmMessage(name: string, usedVideos: number): stri
 /** 組み込み機能の名前（パックの鍵＝`KNOWN_PACK_FEATURES`）を画面の言葉へ。 */
 export const PACK_FEATURE_LABEL: Record<PackFeature, string> = {
   "personalized-briefing": "あなた向け会社説明",
+  // ⚠️ 動画の種類の表示名から引く（ADR-0076）＝鍵の名前と、ウィザードのカードの名前を割らない。
+  "recruit-video": VIDEO_KIND_LABEL.recruit,
 };
 /** この版のアプリに無い機能（新しいパックを古いアプリへ入れたとき）。識別子をそのまま画面に出さない（§2-3）。 */
 export const PACK_UNKNOWN_FEATURE_LABEL = "（この版では使えない機能）";

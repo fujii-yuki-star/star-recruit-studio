@@ -182,6 +182,19 @@ describe('assembleProject', () => {
     // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
     expect('companyInfo' in g).toBe(false);
   });
+
+  // ADR-0076 決定4：種類が無いときは中身から決める（会社情報だけ→採用・それ以外→一般＝新しい動画の既定）。
+  it('種類が無いとき：会社情報だけなら採用・発表内容があるか何も無ければ一般（ADR-0076 決定4）', () => {
+    expect(assembleProject(header(), [], [], []).videoKind).toBe('recruit');
+    const withBrief = header({ companyInfo: undefined, generalBrief: { title: '報告' } });
+    expect(assembleProject(withBrief, [], [], []).videoKind).toBe('general');
+    expect(assembleProject(header({ companyInfo: undefined }), [], [], []).videoKind).toBe('general');
+    // 両方を持つ（ありえないが）なら一般＝会社情報「だけ」のときに限って採用にする。
+    const both = header({ generalBrief: { title: '報告' } });
+    expect(assembleProject(both, [], [], []).videoKind).toBe('general');
+    // 種類があればそのまま（中身から決め直さない）。
+    expect(assembleProject(header({ videoKind: 'general' }), [], [], []).videoKind).toBe('general');
+  });
 });
 
 describe('projectHeaderFromProject（assembleProject の逆・#324）', () => {

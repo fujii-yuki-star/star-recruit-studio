@@ -305,11 +305,19 @@ export function replacePackTemplates(templates: readonly Template[], packTemplat
   return [...templates.filter((t) => !isPackScopedId(t.templateId)), ...packTemplates];
 }
 
-/** アプリに組み込んである機能の名前（パックの鍵で出す・ADR-0060 決定1）。 */
-export const KNOWN_PACK_FEATURES = ['personalized-briefing'] as const;
+/**
+ * アプリに組み込んである機能の名前（パックの鍵で出す・ADR-0060 決定1）。
+ * - `personalized-briefing`＝あなた向け会社説明（ADR-0061）
+ * - `recruit-video`＝「採用動画」を新しく作る入口（ADR-0076）。⚠️ 鍵が決めるのは**見せるかどうか**だけ＝
+ *   採用の機能そのものはアプリに入ったまま・鍵が無くても以前に作った採用動画は開いて直せる（ADR-0076 決定3）。
+ */
+export const KNOWN_PACK_FEATURES = ['personalized-briefing', 'recruit-video'] as const;
 export type PackFeature = (typeof KNOWN_PACK_FEATURES)[number];
 /** 組み込み機能の名前を参照する定数（§6：文字列直書きを避ける）。 */
-export const PACK_FEATURE = { personalizedBriefing: 'personalized-briefing' } as const satisfies Record<string, PackFeature>;
+export const PACK_FEATURE = {
+  personalizedBriefing: 'personalized-briefing',
+  recruitVideo: 'recruit-video',
+} as const satisfies Record<string, PackFeature>;
 
 /** 入っているパックがその組み込み機能を有効にしているか（左の帯に出すか・ADR-0060 決定1）。 */
 export function isPackFeatureEnabled(manifests: readonly ExtensionPackManifest[], feature: PackFeature): boolean {

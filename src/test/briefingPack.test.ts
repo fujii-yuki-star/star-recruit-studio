@@ -1,4 +1,5 @@
-// 社内配布用の拡張パック「あなた向け会社説明」（ADR-0060・0061）の元（`packs/personalized-briefing/pack/manifest.json`）。
+// 社内配布用の拡張パック「採用向け」（ADR-0060・0061・0076）の元（`packs/personalized-briefing/pack/manifest.json`）。
+// ⚠️ 1.1.0 から鍵は2つ＝あなた向け会社説明と採用動画（ADR-0076 決定1＝同じ β のパックに両方を入れる）。
 // ⚠️ 配るものなので、アプリと同じ読み方で読めること・鍵が入っていること・作る命令の出力名が版と合っていることを留める。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -8,7 +9,7 @@ import { validateExtensionPack } from '../domain/validation/generated/validators
 
 const raw = readFileSync('packs/personalized-briefing/pack/manifest.json', 'utf8');
 
-describe('配布用の拡張パック「あなた向け会社説明」', () => {
+describe('配布用の拡張パック「採用向け」', () => {
   it('正典の形を満たし、アプリと同じ読み方で読め、機能の鍵だけが入っている', () => {
     // `files` は作る道具が埋める＝元には無い。読むときと同じ形にして確かめる。
     const withFiles = { ...JSON.parse(raw), files: [] };
@@ -16,7 +17,7 @@ describe('配布用の拡張パック「あなた向け会社説明」', () => {
     const r = parsePackManifest(JSON.stringify(withFiles));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.manifest.contents.features).toEqual([PACK_FEATURE.personalizedBriefing]);
+    expect(r.manifest.contents.features).toEqual([PACK_FEATURE.personalizedBriefing, PACK_FEATURE.recruitVideo]);
     expect(Object.keys(r.manifest.contents)).toEqual(['features']);
   });
 

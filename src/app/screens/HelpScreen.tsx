@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { PlayIcon } from "../components/icons";
 import { SCREEN_TITLES } from "../screenTitles";
-import { HELP_FLOW, HELP_PLACES, HELP_TIMELINE, HELP_TIPS, type HelpStep } from "../data/helpGuide";
+import { helpFlowFor, HELP_PLACES, HELP_TIMELINE, HELP_TIPS, type HelpStep } from "../data/helpGuide";
 import { TUTORIAL_VIDEOS, tutorialVideoResourcePath, type TutorialVideo } from "../data/tutorialVideos";
 import { tutorialVideoUrl } from "../../infrastructure/tutorialFs";
 import { TUTORIAL_VIDEO_UNAVAILABLE_MESSAGE } from "../uiLabels";
+import { useProjectStore } from "../store/projectStore";
+import { isPackFeatureEnabled, PACK_FEATURE } from "../../domain/pack/extensionPack";
 
 /** 案内1件（見出しは画面の名前をそのまま引く＝書き写さない・#1229）。 */
 function GuideItem({ step, index }: { step: HelpStep; index?: number }) {
@@ -37,6 +39,8 @@ function GuideItem({ step, index }: { step: HelpStep; index?: number }) {
  *（押しても何も起きない項目を作らない・§2-5）。
  */
 export function HelpScreen() {
+  // 採用動画に触れるのは拡張パックの鍵があるときだけ（ADR-0076 決定2）。
+  const helpFlow = helpFlowFor(useProjectStore((st) => isPackFeatureEnabled(st.packs, PACK_FEATURE.recruitVideo)));
   const [playing, setPlaying] = useState<TutorialVideo | null>(null);
   // 再生する道（どの映像の道かを添えて持つ＝選び直した直後に前の映像の道を見せない）。
   // ⚠️ **同梱物の口（`asset://`）で読む**（#1229）＝埋め込み（`public/`）だと先へ飛べない。
@@ -112,7 +116,7 @@ export function HelpScreen() {
             上から順に進みます。途中で左のメニューからほかの場所へ行っても、「今の動画」から元の続きに戻れます。
           </p>
           <div className="col gap-sm mt">
-            {HELP_FLOW.map((step, i) => (
+            {helpFlow.map((step, i) => (
               <GuideItem key={step.screen} step={step} index={i + 1} />
             ))}
           </div>

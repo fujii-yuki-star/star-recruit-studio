@@ -27,17 +27,29 @@ export interface HelpStep {
 }
 
 /**
+ * 最初の段の、用途の選び方の1行（ADR-0076 決定2）。
+ * ⚠️ **採用動画は拡張パックの鍵があるときだけ触れる**＝鍵の無い人のウィザードには種類の選択が無く、目的だけを選ぶ。
+ */
+function kindChoiceLine(recruitVideo: boolean): string {
+  return recruitVideo
+    ? `「${VIDEO_KIND_LABEL[VIDEO_KIND.general]}」と「${VIDEO_KIND_LABEL[VIDEO_KIND.recruit]}」から選びます。`
+      + "選んだ用途に合わせて、聞かれることと動画案の組み立て方が変わります。"
+    : "動画の目的を選びます。選んだ目的に合わせて、聞かれることと動画案の組み立て方が変わります。";
+}
+
+/**
  * 動画づくりの一本道（場面形式）。上から順に進む。
  *
  * ⚠️ **並び順がそのまま案内の順番**＝画面の中で並べ替えない。
+ * ⚠️ `recruitVideo`＝拡張パックの鍵 `recruit-video` があるか（ADR-0076）。画面は鍵を見て選ぶ。
  */
-export const HELP_FLOW: readonly HelpStep[] = [
+export function helpFlowFor(recruitVideo: boolean): readonly HelpStep[] {
+  return [
   {
     screen: "wizard",
     summary: "用途と画面の形を選び、伝えたいことと素材を渡します。",
     detail: [
-      `「${VIDEO_KIND_LABEL[VIDEO_KIND.recruit]}」と「${VIDEO_KIND_LABEL[VIDEO_KIND.general]}」から選びます。`
-        + "選んだ用途に合わせて、聞かれることと動画案の組み立て方が変わります。",
+      kindChoiceLine(recruitVideo),
       `画面の形は「${ORIENTATION_LABEL[ORIENTATION.landscape]}」と「${ORIENTATION_LABEL[ORIENTATION.portrait]}」から選びます。`
         + "会議室のテレビやパソコンで見せるなら横型、スマホで見せるなら縦型です。",
       "伝えたいことを書き、使いたい写真や動画を入れます。",
@@ -117,7 +129,11 @@ export const HELP_FLOW: readonly HelpStep[] = [
       "書き出している間はほかの編集を止めます。終わると画面に知らせが出ます。",
     ],
   },
-];
+  ];
+}
+
+/** 鍵の無いときの一本道（本体の既定＝一般向け・ADR-0076）。門番（`helpGuide.test.ts`）が画面の覆いを見るのに使う。 */
+export const HELP_FLOW: readonly HelpStep[] = helpFlowFor(false);
 
 /**
  * タイムライン形式（別の作り方）。

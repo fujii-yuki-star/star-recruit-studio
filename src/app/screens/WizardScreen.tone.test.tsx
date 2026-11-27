@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { WizardScreen } from "./WizardScreen";
 import { useProjectStore } from "../store/projectStore";
 import { TONE_PRESETS } from "../../domain/constants";
+import { openAsRecruitVideo } from "../../test/recruitVideo";
 
 describe("WizardScreen トーン（採用）", () => {
   const realApply = useProjectStore.getState().applyProjectInfo;
@@ -17,8 +18,9 @@ describe("WizardScreen トーン（採用）", () => {
   it("会社情報の画面にトーンの選択肢があり、選んだものが保存される", () => {
     const spy = vi.fn();
     useProjectStore.setState({ applyProjectInfo: spy });
+    openAsRecruitVideo(); // 採用動画を開く（新しい動画の土台は一般＝ADR-0076 決定4）
     render(<WizardScreen onNavigate={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "次へ" })); // 種類/目的 → 会社情報（採用が既定）
+    fireEvent.click(screen.getByRole("button", { name: "次へ" })); // 種類/目的 → 会社情報
     expect(screen.getByText("トーン（話し方の雰囲気）")).toBeTruthy();
     for (const t of TONE_PRESETS) expect(screen.getByRole("button", { name: t })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "フォーマル" }));

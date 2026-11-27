@@ -9,6 +9,7 @@ import { VIDEO_KIND } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
+import { openAsRecruitVideo } from "../../test/recruitVideo";
 
 function photo(id: string, name: string): Asset {
   return { assetId: id, assetType: ASSET_TYPE.image, displayName: name, filePath: `${id}.png` };
@@ -29,6 +30,7 @@ describe("WizardScreen 入力保護（#401）", () => {
   it("会社名を入力して離脱すると、その内容が applyProjectInfo で store に確定される（離脱コミット）", () => {
     const spy = vi.fn();
     useProjectStore.setState({ applyProjectInfo: spy });
+    openAsRecruitVideo(); // 会社情報の欄は採用動画（新しい動画の土台は一般＝ADR-0076 決定4）
     const { unmount } = render(<WizardScreen onNavigate={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0(種類/目的)→step1(会社情報)
     fireEvent.change(screen.getByLabelText(/会社名/), { target: { value: "テスト株式会社" } });
@@ -41,6 +43,7 @@ describe("WizardScreen 入力保護（#401）", () => {
   it("会社名入力→次へ（確定）直後に離脱しても二重に applyProjectInfo しない（#401 レビュー・二重発火防止）", () => {
     const spy = vi.fn();
     useProjectStore.setState({ applyProjectInfo: spy });
+    openAsRecruitVideo();
     const { unmount } = render(<WizardScreen onNavigate={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0→1
     fireEvent.change(screen.getByLabelText(/会社名/), { target: { value: "テスト株式会社" } });
@@ -118,6 +121,7 @@ describe("必須の欄は、押す前に分かる（#1026）", () => {
 
   /** ⚠️ **入口は種類/目的の段**＝会社情報の欄は「次へ」で1つ進めてから出る。 */
   const toCompanyStep = () => {
+    openAsRecruitVideo(); // 会社情報の欄は採用動画（ADR-0076 決定4）
     render(<WizardScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" }));
   };
@@ -177,15 +181,17 @@ describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
   it("進んだ段では、1つ前の段の名前を言う", () => {
     render(<WizardScreen onNavigate={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "次へ" })); // step0 → step1
-    expect(screen.getByRole("button", { name: "動画の種類と目的へ戻る" })).toBeTruthy();
+    // 鍵が無い新しい動画＝種類の選択は無い（ADR-0076 決定2）＝名札も「動画の目的」。
+    expect(screen.getByRole("button", { name: "動画の目的へ戻る" })).toBeTruthy();
   });
 
   // ⚠️ **段を辿って画面で見る**（#1141 レビュー由来 🟡）＝もとは step0→1 の1遷移だけを見ていて、
   // 残りは `wizardBackLabel(i, steps)` を **同じ配列自身**と突き合わせる自己同一性の検査だった。
   // それだと `backName` の**取り違え**（「会社情報」と「写真・動画」が入れ替わる）が捕まらない。声の段は外した（ADR-0048 追補 2026-10-05）。
   it.each([
+    // 採用＝保存済みの採用動画を開いた（種類を選べる）／一般＝鍵の無い新しい動画（種類を選ばない）＝ADR-0076。
     [VIDEO_KIND.recruit, ["動画の種類と目的", "会社情報", "写真・動画"]],
-    [VIDEO_KIND.general, ["動画の種類と目的", "発表の内容", "写真・動画"]],
+    [VIDEO_KIND.general, ["動画の目的", "発表の内容", "写真・動画"]],
   ])("%s：段を進めるたびに、1つ前の段の名前へ変わる", (kind, names) => {
     useProjectStore.setState((st) => ({ meta: { ...st.meta, videoKind: kind } }));
     render(<WizardScreen onNavigate={() => {}} />);
@@ -211,8 +217,10 @@ describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
   });
 
   it("どの段にも行き先の呼び名がある（名札だけ足して呼び名を忘れない）", () => {
-    for (const kind of [VIDEO_KIND.recruit, VIDEO_KIND.general]) {
-      const steps = stepsFor(kind);
+    for (const [kind, kindChoice] of [
+      [VIDEO_KIND.recruit, true], [VIDEO_KIND.general, true], [VIDEO_KIND.general, false],
+    ] as const) {
+      const steps = stepsFor(kind, kindChoice);
       for (const s of steps) {
         expect(s.backName.length, `${s.label} に行き先の呼び名がありません`).toBeGreaterThan(0);
         // ⚠️ **呼び名は名札から採る**（#1141 レビュー由来 🟡）＝画面に出ていない言い換えを
@@ -245,8 +253,8 @@ describe("戻るの行き先名（#1026・`06 §2` 規約3）", () => {
 // ADR-0048 追補（利用者判断 2026-10-05）：声の段を外し、最後の段で小さく選ぶ（たたき台を見るまでを短くする）。
 describe("声の段を外した", () => {
   it("段は4つ・声は最後の段で選べ、選んだ声で動画案へ進む", () => {
-    expect(stepsFor(VIDEO_KIND.recruit).map((s) => s.label)).not.toContain("読み上げの声を設定");
-    expect(stepsFor(VIDEO_KIND.recruit)).toHaveLength(WIZARD_STEP.ready + 1);
+    expect(stepsFor(VIDEO_KIND.recruit, true).map((s) => s.label)).not.toContain("読み上げの声を設定");
+    expect(stepsFor(VIDEO_KIND.recruit, true)).toHaveLength(WIZARD_STEP.ready + 1);
     useProjectStore.setState({ wizardStep: WIZARD_STEP.ready });
     const onNavigate = vi.fn();
     render(<WizardScreen onNavigate={onNavigate} />);
