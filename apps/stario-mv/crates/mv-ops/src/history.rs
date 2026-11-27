@@ -215,6 +215,8 @@ pub fn label_of(ops: &[Value], user: bool) -> String {
             "splitLayer" => "レイヤーを分ける",
             "setParent" => "親を付ける",
             "precompose" => "プリコンポーズ",
+            "setSpeed" => "速度を変える",
+            "enableTimeRemap" => "タイムリマップ",
             "addComposition" => "コンポジションを足す",
             "updateComposition" => "コンポジションを直す",
             "removeComposition" => "コンポジションを外す",

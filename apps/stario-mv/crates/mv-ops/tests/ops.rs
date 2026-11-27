@@ -1130,3 +1130,183 @@ fn プリコンポーズの親子と入れ子の既定() {
         (Some(10), Some(70), Some(10))
     );
 }
+
+fn same_pixels(a: &[u8], b: &[u8]) -> bool {
+    a.iter().zip(b).filter(|(x, y)| x.abs_diff(**y) > 2).count() * 1000 < a.len()
+}
+
+/// MV-0012 決定3：速度＝直線のキーフレーム2つ。倍速・逆再生の絵は元の絵のその時刻と同じ・見える範囲の長さが変わる。
+#[test]
+fn 速度を変えると絵がその速さになる() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    let orig: Vec<Vec<u8>> = (0..=20).map(|f| frame_pixels(&mut ops, &dir, f)).collect();
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "precompose", "layerIds": [TITLE, BG] }]}),
+    );
+    let pre = out.json["created"][1]["id"].as_str().unwrap().to_string();
+    // 倍速＝新しい 5 フレームが元の 10・見える範囲は 90 → 45
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 200 }]}),
+    );
+    assert_eq!(out.json["applied"], true, "{}", out.json);
+    assert_eq!(
+        out.json["warnings"],
+        json!([]),
+        "変形が動かなければ知らせない"
+    );
+    assert_eq!(out.json["history"]["undo"], "AI：速度を変える");
+    let (doc, _) = read_doc(&dir).unwrap();
+    let l = &doc["compositions"][0]["layers"][0];
+    assert_eq!(l["outFrame"], 45);
+    assert_eq!(
+        l["timeRemap"],
+        json!({ "keyframes": [
+            { "frame": 0, "value": 0.0, "interpolation": "linear" },
+            { "frame": 45, "value": 3.0, "interpolation": "linear" },
+        ]})
+    );
+    for f in [3, 5, 7] {
+        assert!(
+            same_pixels(&frame_pixels(&mut ops, &dir, f), &orig[2 * f as usize]),
+            "倍速 {f}"
+        );
+    }
+    // 等速に戻す＝見せていた素材の区間（0〜3 秒）を保つ＝90 に戻る
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 100 }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    assert_eq!(doc["compositions"][0]["layers"][0]["outFrame"], 90);
+    // 逆再生＝見えていた区間の終わり（3 秒）から＝新しい f が元の 90 − f
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": -100 }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    let l = &doc["compositions"][0]["layers"][0];
+    assert_eq!(l["timeRemap"]["keyframes"][0]["value"], 3.0);
+    assert_eq!(l["timeRemap"]["keyframes"][1]["value"], 0.0);
+    for f in [75, 80, 85] {
+        assert!(
+            same_pixels(&frame_pixels(&mut ops, &dir, f), &orig[90 - f as usize]),
+            "逆再生 {f}"
+        );
+    }
+    // 変形にキーフレームがあれば、時刻は動かないと知らせる
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": pre, "patch": { "transform": { "opacity": { "value": null, "keyframes": [
+            { "frame": 0, "value": 0, "interpolation": "linear" }, { "frame": 10, "value": 1, "interpolation": "linear" }] } } } }]}),
+    );
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 50 }]}),
+    );
+    assert!(
+        out.json["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("時刻は動きません"),
+        "{}",
+        out.json
+    );
+    // 0・時刻を持たないレイヤーは断る
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir), "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 0 }] }))
+        .unwrap_err();
+    assert!(e.message.contains("0 でない数"), "{}", e.message);
+    let (doc, _) = read_doc(&dir).unwrap();
+    let cid = doc["compositions"][0]["layers"][0]["compositionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let inner = doc["compositions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == cid)
+        .unwrap();
+    let bg = inner["layers"][1]["id"].as_str().unwrap().to_string();
+    let e = ops
+        .call("applyTransaction", &json!({ "project": p(&dir), "ops": [{ "op": "setSpeed", "layerId": bg, "percent": 50 }] }))
+        .unwrap_err();
+    assert!(e.message.contains("時刻を持たない"), "{}", e.message);
+}
+
+/// MV-0012 決定3：タイムリマップを入れても見え方は変わらない・外すと消える・既にあれば変えない。
+#[test]
+fn タイムリマップの入り切り() {
+    let (_r, dir) = sample();
+    let mut ops = ops_allowing(vec![]);
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "precompose", "layerIds": [TITLE, BG] }]}),
+    );
+    let pre = out.json["created"][1]["id"].as_str().unwrap().to_string();
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "updateLayer", "layerId": pre, "patch": { "startFrame": 6, "inFrame": 12 } }]}),
+    );
+    let before: Vec<Vec<u8>> = [12, 20, 40]
+        .iter()
+        .map(|&f| frame_pixels(&mut ops, &dir, f))
+        .collect();
+    let out = tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "enableTimeRemap", "layerId": pre }]}),
+    );
+    assert_eq!(out.json["history"]["undo"], "AI：タイムリマップ");
+    let (doc, _) = read_doc(&dir).unwrap();
+    // 始め 12（素材の 0.2 秒）・終わり 90（素材の 2.8 秒）
+    assert_eq!(
+        doc["compositions"][0]["layers"][0]["timeRemap"],
+        json!({ "keyframes": [
+            { "frame": 12, "value": 0.2, "interpolation": "linear" },
+            { "frame": 90, "value": 2.8, "interpolation": "linear" },
+        ]})
+    );
+    for (i, &f) in [12, 20, 40].iter().enumerate() {
+        assert!(
+            same_pixels(&frame_pixels(&mut ops, &dir, f), &before[i]),
+            "入れても同じ {f}"
+        );
+    }
+    // 既にあれば変えない
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "setSpeed", "layerId": pre, "percent": 50 }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    let kept = doc["compositions"][0]["layers"][0]["timeRemap"].clone();
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "enableTimeRemap", "layerId": pre, "enabled": true }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    assert_eq!(doc["compositions"][0]["layers"][0]["timeRemap"], kept);
+    // 外す
+    tx(
+        &mut ops,
+        &dir,
+        json!({ "ops": [{ "op": "enableTimeRemap", "layerId": pre, "enabled": false }]}),
+    );
+    let (doc, _) = read_doc(&dir).unwrap();
+    assert!(doc["compositions"][0]["layers"][0]
+        .get("timeRemap")
+        .is_none());
+}

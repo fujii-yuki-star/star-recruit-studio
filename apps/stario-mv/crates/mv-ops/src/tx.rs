@@ -23,6 +23,8 @@ pub const TX_OPS: &[&str] = &[
     "splitLayer",
     "setParent",
     "precompose",
+    "setSpeed",
+    "enableTimeRemap",
     "addComposition",
     "updateComposition",
     "removeComposition",
@@ -324,6 +326,63 @@ pub fn apply_ops_warn(
                     id: pre_id,
                 });
             }
+            "setSpeed" => {
+                // 速度＝見える範囲の始めと終わりの直線のキーフレーム2つ（MV-0012 決定3）
+                let id = str_arg(op, "layerId");
+                let (ci, li) = find_layer(doc, id).ok_or_else(|| fail(layer_missing(id)))?;
+                let percent = op
+                    .get("percent")
+                    .and_then(Value::as_f64)
+                    .filter(|p| p.is_finite() && *p != 0.0)
+                    .ok_or_else(|| {
+                        fail(
+                            "percent に 0 でない数を書いてください（100 で等速・負で逆再生）。"
+                                .into(),
+                        )
+                    })?;
+                let (c, l) = timed_layer(&doc["compositions"][ci], id).map_err(&fail)?;
+                let fps = f64::from(c.fps.num) / f64::from(c.fps.den);
+                let (a, b) = (
+                    source_sec_or(&c, &l, l.in_frame).map_err(&fail)?,
+                    source_sec_or(&c, &l, l.out_frame).map_err(&fail)?,
+                );
+                // 見せていた素材の長さを保つ（止まっていたら見える範囲の長さ）
+                let span = match (b - a).abs() {
+                    s if s > 1e-9 => s,
+                    _ => (l.out_frame - l.in_frame) as f64 / fps,
+                };
+                let n = ((span * fps * 100.0 / percent.abs()).round() as i64).max(1);
+                // 逆再生は、見えていた区間の終わりから始める
+                let s0 = if percent > 0.0 { a.min(b) } else { a.max(b) };
+                let s1 = s0 + n as f64 / fps * percent / 100.0;
+                let layer = &mut doc["compositions"][ci]["layers"][li];
+                layer["timeRemap"] = remap_keys(l.in_frame, s0, l.in_frame + n, s1);
+                layer["outFrame"] = json!(l.in_frame + n);
+                if moving_transform(layer) {
+                    warnings.push(format!(
+                        "「{}」の変形にキーフレームか式があります。速度を変えても、それらの時刻は動きません（AE の時間伸縮と違います）。",
+                        l.name
+                    ));
+                }
+            }
+            "enableTimeRemap" => {
+                // タイムリマップの入り切り（MV-0012 決定3＝AE の「タイムリマップ使用可能」）
+                let id = str_arg(op, "layerId");
+                let (ci, li) = find_layer(doc, id).ok_or_else(|| fail(layer_missing(id)))?;
+                let enabled = op.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                let (c, l) = timed_layer(&doc["compositions"][ci], id).map_err(&fail)?;
+                let layer = &mut doc["compositions"][ci]["layers"][li];
+                if !enabled {
+                    if let Value::Object(m) = layer {
+                        m.remove("timeRemap");
+                    }
+                } else if l.time_remap.is_none() {
+                    // 今の見え方のまま＝始めと終わりに、今見せている秒のキーフレーム
+                    let a = source_sec_or(&c, &l, l.in_frame).map_err(&fail)?;
+                    let b = source_sec_or(&c, &l, l.out_frame).map_err(&fail)?;
+                    layer["timeRemap"] = remap_keys(l.in_frame, a, l.out_frame, b);
+                }
+            }
             "addComposition" => {
                 let Some(Value::Object(src)) = op.get("composition") else {
                     return Err(fail(
@@ -504,6 +563,61 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
             merge_patch(t.entry(k.clone()).or_insert(Value::Null), v);
         }
     }
+}
+
+/// 時刻を持つレイヤー（映像・音・入れ子）を形どおりに読む（MV-0012 決定3）。他の種類は断る。
+fn timed_layer(
+    comp: &Value,
+    id: &str,
+) -> Result<(mv_core::model::Composition, mv_core::model::Layer), String> {
+    use mv_core::model::LayerType;
+    let c: mv_core::model::Composition = serde_json::from_value(comp.clone())
+        .map_err(|e| format!("コンポジションが形に入らないので、速度を決められません（{e}）。先に形を直してください。"))?;
+    let l = c
+        .layers
+        .iter()
+        .find(|l| l.id == id)
+        .cloned()
+        .ok_or_else(|| layer_missing(id))?;
+    if !matches!(
+        l.layer_type,
+        LayerType::Video | LayerType::Audio | LayerType::Precomp
+    ) {
+        return Err(format!(
+            "「{}」は時刻を持たないレイヤーです。速度・タイムリマップは映像・音・入れ子のレイヤーだけです。",
+            l.name
+        ));
+    }
+    Ok((c, l))
+}
+
+fn source_sec_or(
+    c: &mv_core::model::Composition,
+    l: &mv_core::model::Layer,
+    frame: i64,
+) -> Result<f64, String> {
+    mv_core::eval::source_sec(c, l, frame as f64).map_err(|e| {
+        format!(
+            "「{}」のタイムリマップの値を求められません（{e:?}）。値かキーフレームを書いてください。",
+            l.name
+        )
+    })
+}
+
+/// 直線のキーフレーム2つのタイムリマップ。
+fn remap_keys(f0: i64, s0: f64, f1: i64, s1: f64) -> Value {
+    json!({ "keyframes": [
+        { "frame": f0, "value": s0, "interpolation": "linear" },
+        { "frame": f1, "value": s1, "interpolation": "linear" },
+    ]})
+}
+
+/// 変形のどれかがキーフレームか式か。
+fn moving_transform(layer: &Value) -> bool {
+    layer["transform"].as_object().is_some_and(|t| {
+        t.values()
+            .any(|a| a.get("keyframes").is_some() || a.get("expression").is_some())
+    })
 }
 
 /// 入れ子のレイヤーの既定（MV-0011 決定3）＝種類・アンカーは中の中心・長さは中の長さ（外の fps に直す・外の終わりで止める）。
