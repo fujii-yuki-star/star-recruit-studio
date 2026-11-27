@@ -198,6 +198,7 @@ fn run(
         };
         let mut want_play = false;
         let mut force_reload = false;
+        let mut bound_replies = Vec::new();
         for cmd in first.into_iter().chain(rx.try_iter()) {
             let duration = comp_info.map(|c| c.1).unwrap_or(1);
             match cmd {
@@ -252,11 +253,8 @@ fn run(
                     force_reload = true;
                 }
                 Cmd::Bounds(reply) => {
-                    let r = match &open {
-                        Some(o) => bounds(&mut renderer, o, frame, rect),
-                        None => Err("動画を開いていません。".into()),
-                    };
-                    let _ = reply.send(r);
+                    // ⚠️ 答えるのは読み直しのあと＝保存の直後に頼まれても、古い中身の枠を返さない
+                    bound_replies.push(reply);
                     continue;
                 }
                 Cmd::Composition(id) => {
@@ -356,6 +354,14 @@ fn run(
                     }
                 }
             }
+        }
+
+        for reply in bound_replies.drain(..) {
+            let r = match &open {
+                Some(o) => bounds(&mut renderer, o, frame, rect),
+                None => Err("動画を開いていません。".into()),
+            };
+            let _ = reply.send(r);
         }
 
         // 窓の大きさ

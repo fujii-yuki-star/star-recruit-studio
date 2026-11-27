@@ -209,6 +209,7 @@ export function App(): React.JSX.Element {
             disabled={!editComp}
             onImport={() => {
               void editApi.pickAssets().then((paths) => {
+                // ⚠️ commit も空の取引は送らない（二重の守り＝ここを外しても同じ結果・変異チェックで確かめた）
                 if (paths.length > 0) void commit(paths.map((path) => ({ op: "importAsset", path, mode: "copy" })));
               });
             }}
