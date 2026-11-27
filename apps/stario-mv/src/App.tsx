@@ -47,9 +47,7 @@ export function App(): React.JSX.Element {
   const selectedLayer = selected.size === 1 ? (editComp?.layers.find((l) => selected.has(l.id)) ?? null) : null;
   const { commit: editCommit, refresh: editRefresh } = editor;
   const commit = useCallback(
-    (ops: Op[]) => {
-      if (ops.length > 0) void editCommit(ops);
-    },
+    (ops: Op[]): Promise<boolean> => (ops.length > 0 ? editCommit(ops) : Promise.resolve(false)),
     [editCommit],
   );
 

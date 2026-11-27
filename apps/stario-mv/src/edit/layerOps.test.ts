@@ -12,6 +12,7 @@ import {
   stackStepOps,
   toggleOp,
   trimInOps,
+  withTrial,
   trimOutOps,
   trimToPlayheadOps,
 } from "./layerOps";
@@ -119,6 +120,24 @@ describe("分割・詰める・消す", () => {
       { op: "updateLayer", layerId: "post", patch: { inFrame: 40, outFrame: 60, startFrame: 40 } },
     ]);
     expect(rippleRemoveOps(c, set("lock"))).toEqual([]);
+  });
+});
+
+describe("掴んでいる途中の帯の見え方", () => {
+  it("試しの時刻の変更だけを当て、元の並びと中身は変えない", () => {
+    const ls = [layer("A", 0, 10), layer("B", 10, 20)];
+    const shown = withTrial(ls, [
+      { op: "updateLayer", layerId: "B", patch: { inFrame: 15, outFrame: 25, startFrame: 15 } },
+      { op: "updateLayer", layerId: "B", patch: { name: "名前は見え方に使わない" } },
+      { op: "removeLayer", layerId: "A" },
+    ]);
+    expect(shown.map((l) => [l.id, l.inFrame, l.outFrame, l.startFrame, l.name])).toEqual([
+      ["A", 0, 10, 0, "A"],
+      ["B", 15, 25, 15, "B"],
+    ]);
+    expect(ls[1].inFrame).toBe(10);
+    // 片方の端だけ（切る）
+    expect(withTrial(ls, [{ op: "updateLayer", layerId: "A", patch: { outFrame: 5 } }])[0]).toMatchObject({ inFrame: 0, outFrame: 5 });
   });
 });
 

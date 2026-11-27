@@ -148,3 +148,22 @@ export function rangeSelect(comp: Composition, anchor: string, to: string): stri
   const [lo, hi] = a < b ? [a, b] : [b, a];
   return ids.slice(lo, hi + 1);
 }
+
+/**
+ * 掴んでいる途中の見え方＝試しの中の時刻の変更（`updateLayer` の inFrame・outFrame・startFrame）だけを当てた写し。
+ * ⚠️ プレビューは Rust が試しを描くが、**タイムラインの帯も一緒に動かす**（離すまで帯が止まって見えないように）。
+ */
+export function withTrial(layers: readonly Layer[], ops: readonly Op[]): Layer[] {
+  const patch = new Map<string, Partial<Layer>>();
+  for (const o of ops) {
+    if (o.op !== "updateLayer") continue;
+    const p: Partial<Layer> = {};
+    for (const k of ["inFrame", "outFrame", "startFrame"] as const) {
+      const v = o.patch[k];
+      if (typeof v === "number") p[k] = v;
+    }
+    patch.set(o.layerId, { ...patch.get(o.layerId), ...p });
+  }
+  return patch.size === 0 ? [...layers] : layers.map((l) => (patch.has(l.id) ? { ...l, ...patch.get(l.id) } : l));
+}
+

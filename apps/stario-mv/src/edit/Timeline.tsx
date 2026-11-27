@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { moveOps, rangeSelect, renameOp, reorderOps, toggleOp, trimInOps, trimOutOps } from "./layerOps";
+import { moveOps, rangeSelect, renameOp, reorderOps, toggleOp, trimInOps, trimOutOps, withTrial } from "./layerOps";
 import { fitPxPerFrame, frameToX, snapOffset, snapTargets, xToFrame, zoomed } from "./timelineMath";
 import type { Composition, Layer, Op } from "./types";
 
@@ -23,8 +23,8 @@ export interface TimelineProps {
   onSeek: (frame: number) => void;
   /** 掴んで動かしている途中（保存しない）。`null` でやめる。 */
   onTrial: (ops: Op[] | null) => void;
-  /** 離した・確定した＝1つの取引。 */
-  onCommit: (ops: Op[]) => void;
+  /** 離した・確定した＝1つの取引。反映できたかを返す（断られたら帯を元に戻す）。 */
+  onCommit: (ops: Op[]) => Promise<boolean> | void;
 }
 
 type Drag =
@@ -50,6 +50,9 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   const [view, setView] = useState({ top: 0, height: 400 });
   const [drag, setDrag] = useState<Drag | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // 離してから読み直しが届くまでの間も、帯を離した位置に描く（元の位置へ一瞬戻らない）。
+  // ⚠️ 状態を消すのに effect を使わない＝「どの並びを見ていたときの試しか」を持ち、並びが替われば使わない
+  const [settling, setSettling] = useState<{ base: readonly Layer[]; ops: Op[] } | null>(null);
   const zoomAnchor = useRef<{ frame: number; offset: number } | null>(null);
 
   // 開いたコンポジションは、欄の幅に全体が収まる大きさで始める
@@ -92,6 +95,14 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
   }, []);
 
   const layers = comp.layers;
+  // 掴んでいる途中は、帯を試しの位置に描く（保存はまだ＝離したら1つの取引）
+  const pending =
+    drag && drag.kind !== "order" && drag.ops.length > 0
+      ? drag.ops
+      : settling && settling.base === layers
+        ? settling.ops
+        : null;
+  const shown = pending ? withTrial(layers, pending) : layers;
   const first = Math.max(0, Math.floor((view.top - RULER_H) / ROW_H) - OVERSCAN);
   const last = Math.min(layers.length, Math.ceil((view.top + view.height) / ROW_H) + OVERSCAN);
   const width = NAME_W + frameToX(comp.durationFrames, ppf) + 40;
@@ -181,8 +192,13 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       if (ops.length > 0) props.onCommit(ops);
       return;
     }
-    if (d.ops.length > 0) props.onCommit(d.ops);
-    else if (d.moved) props.onTrial(null);
+    if (d.ops.length > 0) {
+      setSettling({ base: layers, ops: d.ops });
+      // 断られたら（何も変わらない＝並びも替わらない）帯を元の位置へ戻す
+      void Promise.resolve(props.onCommit(d.ops)).then((ok) => {
+        if (ok === false) setSettling(null);
+      });
+    } else if (d.moved) props.onTrial(null);
     else if (d.narrowOnClick) props.onSelect([d.id], d.id);
   };
 
@@ -235,7 +251,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
             ))}
           </div>
         </div>
-        {layers.slice(first, last).map((l, k) => {
+        {shown.slice(first, last).map((l, k) => {
           const i = first + k;
           const isSel = selected.has(l.id);
           const dropTarget = drag?.kind === "order" && drag.moved && drag.to === i && drag.id !== l.id;

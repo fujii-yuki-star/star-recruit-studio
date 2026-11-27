@@ -9,6 +9,9 @@ const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
 let applyReply: () => unknown = () => ({ applied: true, revision: "r2", reapplied: false, created: [] });
 let reads = 0;
 let lockA = false;
+/** 読み直しを止めておく（離してから読み直しが届くまでの間を見る）。 */
+let heldRead: (() => void) | null = null;
+let holdReads = false;
 
 const comp = {
   id: "cmp_A",
@@ -49,6 +52,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       return { dir: "C:/v", name: "見本", mainCompositionId: "cmp_A", compositions: [comp], issues: [] };
     if (cmd === "edit_read") {
       reads += 1;
+      if (holdReads) {
+        await new Promise<void>((r) => (heldRead = r));
+      }
       return doc();
     }
     if (cmd === "edit_apply") {
@@ -88,6 +94,8 @@ describe("編集画面（MV-0008 ⑧-1）", () => {
     calls.length = 0;
     reads = 0;
     lockA = false;
+    holdReads = false;
+    heldRead = null;
     applyReply = () => ({ applied: true, revision: "r2", reapplied: false, created: [] });
   });
   afterEach(cleanup);
@@ -125,6 +133,8 @@ describe("編集画面（MV-0008 ⑧-1）", () => {
       [{ op: "updateLayer", layerId: "B", patch: { inFrame: 120, outFrame: 220, startFrame: 120 } }],
     ]);
     expect(applied()).toEqual([]);
+    // 帯も試しの位置に描く（離すまで止まって見えない）＝ppf 1 なので 120 画素
+    expect(screen.getByTestId("bar-B").style.left).toBe("120px");
     await act(async () => {
       fireEvent.pointerUp(tl, { clientX: 70 });
     });
@@ -262,6 +272,36 @@ describe("編集画面（MV-0008 ⑧-1）", () => {
       [{ op: "updateLayer", layerId: "A", patch: { locked: true } }],
       [{ op: "updateLayer", layerId: "A", patch: { name: "海の映像" } }],
     ]);
+  });
+
+  it("離してから読み直しが届くまでの間も、帯は離した位置のまま（元の位置へ一瞬戻らない）", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "吸着" }));
+    const tl = screen.getByTestId("timeline");
+    fireEvent.pointerDown(sizeBar("B"), { button: 0, clientX: 50 });
+    fireEvent.pointerMove(tl, { clientX: 70 });
+    holdReads = true;
+    await act(async () => {
+      fireEvent.pointerUp(tl, { clientX: 70 });
+    });
+    expect(applied()).toHaveLength(1);
+    expect(heldRead).not.toBeNull(); // 読み直しはまだ届いていない
+    expect(screen.getByTestId("bar-B").style.left).toBe("120px");
+  });
+
+  it("掴んで離した取引が断られたら、帯は元の位置へ戻る", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "吸着" }));
+    applyReply = () => new Error("この操作は反映していません：理由");
+    const tl = screen.getByTestId("timeline");
+    fireEvent.pointerDown(sizeBar("B"), { button: 0, clientX: 50 });
+    fireEvent.pointerMove(tl, { clientX: 70 });
+    expect(screen.getByTestId("bar-B").style.left).toBe("120px");
+    await act(async () => {
+      fireEvent.pointerUp(tl, { clientX: 70 });
+    });
+    expect(screen.getByRole("alert").textContent).toContain("理由");
+    expect(screen.getByTestId("bar-B").style.left).toBe("100px");
   });
 
   it("断られたら理由を出し（何も変えていない）、当て直したら知らせる", async () => {
