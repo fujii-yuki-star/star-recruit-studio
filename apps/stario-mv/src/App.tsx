@@ -7,6 +7,7 @@ import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
 import { compBlurOp, precomposeOp, sequenceOps, toggleTimeRemapOps } from "./edit/layerOps";
+import { keyId, liveKeys, removeKeysOps, revealAnimated, toggleReveal, type Reveal } from "./edit/keyframes";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -37,6 +38,9 @@ export function App(): React.JSX.Element {
   const [sizes, setSize] = usePaneSizes();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<string | null>(null);
+  // レイヤー＋キーフレームの画面（MV-0014）＝開いているレイヤー・選んだキー（画面の好み＝保存しない）
+  const [revealed, setRevealed] = useState<ReadonlyMap<string, Reveal>>(new Map());
+  const [keyIds, setKeyIds] = useState<string[]>([]);
   // 吸着は既定で入（Premiere の型・MV-0008 決定4）
   const [snapping, setSnapping] = useState(true);
   // 素材の一覧から運んでいる素材（タイムラインへ落とすと置く＝MV-0008 決定4・7）
@@ -58,6 +62,12 @@ export function App(): React.JSX.Element {
     () => new Set(selectedIds.filter((id) => editComp?.layers.some((l) => l.id === id))),
     [selectedIds, editComp],
   );
+  // 消えた・動いたキーを選んだままにしない
+  const selectedKeys = useMemo(
+    () => (editComp ? liveKeys(editComp, keyIds) : []),
+    [keyIds, editComp],
+  );
+  const selectedKeyIds = useMemo(() => new Set(selectedKeys.map(keyId)), [selectedKeys]);
   const selectedLayer = selected.size === 1 ? (editComp?.layers.find((l) => selected.has(l.id)) ?? null) : null;
   const { commit: editCommit, refresh: editRefresh } = editor;
   const commit = useCallback(
@@ -154,6 +164,12 @@ export function App(): React.JSX.Element {
           const ops = toggleTimeRemapOps(editComp, selected);
           if (ops.length > 0) void commit(ops);
         }
+        else if (edit === "reveal") setRevealed((r) => revealAnimated(r, editComp, selected));
+        else if (edit === "remove" && selectedKeys.length > 0) {
+          // キーが選ばれていれば、レイヤーより先にキーを消す（MV-0014 決定2）
+          void commit(removeKeysOps(editComp, selectedKeys));
+          setKeyIds([]);
+        }
         else if (edit === "redo") void editor.redo();
         else commit(editOps(edit, editComp, selected, frame));
         return;
@@ -176,7 +192,7 @@ export function App(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [comp, togglePlay, editComp, selected, frame, commit, editor]);
+  }, [comp, togglePlay, editComp, selected, selectedKeys, frame, commit, editor]);
 
   // 入れ子の中を開く（MV-0011 決定5）＝上のコンポジションの選択を切り替える
   const openComposition = (id: string): void => {
@@ -441,6 +457,10 @@ export function App(): React.JSX.Element {
             onCommit={commit}
             assetDragging={dragAsset != null}
             onOpenNested={openComposition}
+            revealed={revealed}
+            onToggleReveal={(id) => setRevealed((r) => toggleReveal(r, id))}
+            selectedKeys={selectedKeyIds}
+            onSelectKeys={setKeyIds}
             onDropAsset={(f) => {
               if (dragAsset) void commit([placeAssetOp(dragAsset, f, compId)]);
             }}

@@ -24,7 +24,8 @@ export type EditKey =
   | "undo"
   | "redo"
   | "precompose"
-  | "timeRemap";
+  | "timeRemap"
+  | "reveal";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -53,12 +54,14 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (k === "]") return "moveOut";
   if (k === "Delete") return e.shiftKey ? "rippleRemove" : "remove";
   if (k === "s" && !e.shiftKey) return "snap";
+  // キーフレームのある値だけを開く＝U（AE と同じ・MV-0014 決定1）
+  if (k === "u" && !e.shiftKey) return "reveal";
   return null;
 }
 
 /** 編集のキー → 取引の中身（選んでいるレイヤー・今の時刻）。 */
 export function editOps(
-  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose" | "timeRemap">,
+  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose" | "timeRemap" | "reveal">,
   comp: Composition,
   selected: ReadonlySet<string>,
   playhead: number,
