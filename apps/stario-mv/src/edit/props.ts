@@ -59,7 +59,7 @@ function keysOf(path: string): string[] {
 }
 
 /** レイヤーの中の、その場所の動かせる値。 */
-export function animAt(l: Layer, path: AnimPath): Animatable | undefined {
+export function animAt(l: Layer, path: AnimPath | "/timeRemap"): Animatable | undefined {
   let cur: unknown = l;
   for (const k of keysOf(path)) {
     if (cur == null || typeof cur !== "object") return undefined;
@@ -170,7 +170,8 @@ export function keyFramesOf(l: Layer): number[] {
 export function shiftKeyframesPatch(l: Layer, delta: number): Record<string, unknown> {
   let patch: Record<string, unknown> = {};
   if (delta === 0) return patch;
-  for (const p of ANIM_PATHS) {
+  // タイムリマップのキーも一緒に（MV-0012＝ずらしても同じ時刻に同じ素材の秒を見せる・AE と同じ）
+  for (const p of [...ANIM_PATHS, "/timeRemap" as const]) {
     const a = animAt(l, p);
     if (!isAnimated(a)) continue;
     const keyframes = a!.keyframes!.map((k) => ({ ...k, frame: k.frame + delta }));

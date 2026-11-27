@@ -31,6 +31,8 @@ export interface Layer {
   parentId?: string | null;
   /** 入れ子のレイヤーが指すコンポジション（MV-0011）。 */
   compositionId?: string;
+  /** タイムリマップ＝そのフレームで見せる素材の秒（MV-0012）。 */
+  timeRemap?: Animatable;
   blendMode?: BlendMode;
   transform?: Partial<Record<TransformKey, Animatable>>;
   text?: { text: string; fontFamily: string; fontSize: number; fill: Color } & Record<string, unknown>;
@@ -144,7 +146,9 @@ export type Op =
   | { op: "moveLayer"; layerId: string; index: number }
   | { op: "splitLayer"; layerId: string; frame: number }
   | { op: "setParent"; layerId: string; parentId: string | null; frame: number }
-  | { op: "precompose"; layerIds: string[]; name?: string };
+  | { op: "precompose"; layerIds: string[]; name?: string }
+  | { op: "setSpeed"; layerId: string; percent: number }
+  | { op: "enableTimeRemap"; layerId: string; enabled: boolean };
 
 /** レイヤーを直す編集（値の欄の操作は全部これ）。 */
 export type UpdateOp = Extract<Op, { op: "updateLayer" }>;

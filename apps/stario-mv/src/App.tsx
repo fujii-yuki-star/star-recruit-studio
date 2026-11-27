@@ -6,7 +6,7 @@ import { Splitter } from "./edit/Splitter";
 import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
-import { precomposeOp, sequenceOps } from "./edit/layerOps";
+import { precomposeOp, sequenceOps, toggleTimeRemapOps } from "./edit/layerOps";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -149,6 +149,10 @@ export function App(): React.JSX.Element {
         else if (edit === "precompose") {
           const op = precomposeOp(editComp, selected, "入れ子");
           if (op) void commit([op]);
+        }
+        else if (edit === "timeRemap") {
+          const ops = toggleTimeRemapOps(editComp, selected);
+          if (ops.length > 0) void commit(ops);
         }
         else if (edit === "redo") void editor.redo();
         else commit(editOps(edit, editComp, selected, frame));
@@ -310,6 +314,7 @@ export function App(): React.JSX.Element {
             <PropsPanel
               layer={selectedLayer}
               frame={frame}
+              fps={editComp ? editComp.fps.num / editComp.fps.den : 30}
               onTrial={editor.trial}
               onCommit={commit}
               onSeek={(f) => void previewApi.seek(f)}

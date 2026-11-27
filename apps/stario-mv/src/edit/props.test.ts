@@ -163,6 +163,26 @@ describe("ずらすとキーも一緒に動く（AE の型）", () => {
     expect(shiftKeyframesPatch(base(), 5)).toEqual({});
   });
 
+  it("タイムリマップのキーも一緒にずらす（MV-0012＝同じ時刻に同じ素材の秒）・固定値は触らない", () => {
+    const remap = base({
+      timeRemap: {
+        keyframes: [
+          { frame: 0, value: 0, interpolation: "linear" },
+          { frame: 30, value: 2, interpolation: "linear" },
+        ],
+      },
+    });
+    expect(shiftKeyframesPatch(remap, 4)).toEqual({
+      timeRemap: {
+        keyframes: [
+          { frame: 4, value: 0, interpolation: "linear" },
+          { frame: 34, value: 2, interpolation: "linear" },
+        ],
+      },
+    });
+    expect(shiftKeyframesPatch(base({ timeRemap: { value: 1 } }), 4)).toEqual({});
+  });
+
   it("帯の下の◆＝全部の値のキーのフレーム（重ねない・時刻の順）", () => {
     const l = base({
       transform: {

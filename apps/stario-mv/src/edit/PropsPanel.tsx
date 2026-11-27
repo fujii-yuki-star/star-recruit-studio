@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { editApi } from "./api";
 import { NumberScrub } from "./NumberScrub";
+import { isTimed, setSpeedOp, speedOf } from "./layerOps";
 import {
   animAt,
   clampFor,
@@ -33,6 +34,8 @@ const AXES = ["x", "y"];
 export function PropsPanel(props: {
   layer: Layer;
   frame: number;
+  /** コンポジションの fps（速度を求める）。 */
+  fps: number;
   onTrial: (ops: Op[] | null) => void;
   onCommit: (ops: Op[]) => unknown;
   onSeek: (frame: number) => void;
@@ -177,6 +180,45 @@ export function PropsPanel(props: {
           ))}
         </select>
       </label>
+      {isTimed(layer) && (
+        <>
+          <h3>時間</h3>
+          <div className="prop-row plain" data-testid="prop-speed">
+            <span className="prop-label">速度</span>
+            {(() => {
+              const speed = speedOf(layer, props.fps);
+              return speed == null ? (
+                <span className="muted" title="キーフレームでタイムリマップを細かく指定しています">
+                  タイムリマップ
+                </span>
+              ) : (
+                <NumberScrub
+                  label="速度"
+                  value={speed}
+                  step={1}
+                  unit="%"
+                  disabled={locked}
+                  onCommit={(v) => {
+                    const op = setSpeedOp(layer, v);
+                    if (op) props.onCommit([op]);
+                  }}
+                />
+              );
+            })()}
+          </div>
+          <label className="prop-row plain">
+            <span className="prop-label">タイムリマップ</span>
+            <input
+              type="checkbox"
+              aria-label="タイムリマップ"
+              checked={layer.timeRemap != null}
+              disabled={locked}
+              title="今の見え方のまま、始めと終わりにキーフレームを置く（Ctrl+Alt+T）"
+              onChange={(e) => props.onCommit([{ op: "enableTimeRemap", layerId: layer.id, enabled: e.target.checked }])}
+            />
+          </label>
+        </>
+      )}
       {layer.type === "text" && layer.text && (
         <>
           <h3>文字</h3>

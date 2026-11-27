@@ -25,6 +25,16 @@ describe("プリコンポーズのキー（MV-0011 決定5）", () => {
   });
 });
 
+describe("タイムリマップのキー（MV-0012 決定4）", () => {
+  it("Ctrl+Alt+T（Shift を伴えば何もしない・Ctrl+T・Alt+T は編集のキーでない）", () => {
+    expect(k("t", { ctrlKey: true, altKey: true })).toBe("timeRemap");
+    expect(k("T", { ctrlKey: true, altKey: true })).toBe("timeRemap");
+    expect(k("t", { ctrlKey: true, altKey: true, shiftKey: true })).toBeNull();
+    expect(k("t", { ctrlKey: true })).toBeNull();
+    expect(k("t", { altKey: true })).toBeNull();
+  });
+});
+
 describe("編集のキー（MV-0008 決定4・AE の型）", () => {
   it("[ ] は動かす・Alt+[ ] は切る・Ctrl+] [ は重なりの順", () => {
     expect(k("[")).toBe("moveIn");

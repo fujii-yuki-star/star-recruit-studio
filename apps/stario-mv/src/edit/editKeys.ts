@@ -23,7 +23,8 @@ export type EditKey =
   | "snap"
   | "undo"
   | "redo"
-  | "precompose";
+  | "precompose"
+  | "timeRemap";
 
 /**
  * キー → 編集の名前（編集のキーでなければ null）。
@@ -39,6 +40,8 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
   if (ctrl && e.shiftKey && k === "d") return "split";
   // プリコンポーズ＝Ctrl+Shift+C（AE と同じ・MV-0011 決定5）
   if (ctrl && e.shiftKey && !e.altKey && k === "c") return "precompose";
+  // タイムリマップの入り切り＝Ctrl+Alt+T（AE と同じ・MV-0012 決定4）
+  if (ctrl && e.altKey && !e.shiftKey && k === "t") return "timeRemap";
   if (ctrl && !e.shiftKey && k === "a") return "selectAll";
   if (ctrl && k === "]") return "forward";
   if (ctrl && k === "[") return "backward";
@@ -55,7 +58,7 @@ export function editKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "
 
 /** 編集のキー → 取引の中身（選んでいるレイヤー・今の時刻）。 */
 export function editOps(
-  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose">,
+  key: Exclude<EditKey, "selectAll" | "snap" | "undo" | "redo" | "precompose" | "timeRemap">,
   comp: Composition,
   selected: ReadonlySet<string>,
   playhead: number,
