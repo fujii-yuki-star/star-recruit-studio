@@ -33,6 +33,8 @@ export interface Layer {
   compositionId?: string;
   /** タイムリマップ＝そのフレームで見せる素材の秒（MV-0012）。 */
   timeRemap?: Animatable;
+  /** モーションブラーのスイッチ（MV-0013）。 */
+  motionBlur?: boolean;
   blendMode?: BlendMode;
   transform?: Partial<Record<TransformKey, Animatable>>;
   text?: { text: string; fontFamily: string; fontSize: number; fill: Color } & Record<string, unknown>;
@@ -104,6 +106,8 @@ export interface Composition {
   /** 先頭が最前面。 */
   layers: Layer[];
   markers: Marker[];
+  /** モーションブラー（MV-0013）。かかるのは、ここの enabled とレイヤーの motionBlur の両方が true のときだけ。 */
+  motionBlur?: { enabled: boolean; shutterAngle?: number; shutterPhase?: number; samples?: number };
 }
 
 export interface Asset {
@@ -142,6 +146,7 @@ export type Op =
   | { op: "addLayer"; layer: Record<string, unknown>; index?: number; compositionId?: string }
   | { op: "importAsset"; path: string; mode?: "copy" | "reference"; name?: string }
   | { op: "updateLayer"; layerId: string; patch: Record<string, unknown> }
+  | { op: "updateComposition"; compositionId: string; patch: Record<string, unknown> }
   | { op: "removeLayer"; layerId: string }
   | { op: "moveLayer"; layerId: string; index: number }
   | { op: "splitLayer"; layerId: string; frame: number }

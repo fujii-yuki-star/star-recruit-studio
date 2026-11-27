@@ -11,6 +11,7 @@ import {
   splitOps,
   stackStepOps,
   toggleOp,
+  compBlurOp,
   trimInOps,
   withTrial,
   mergePatch,
@@ -222,6 +223,18 @@ describe("速度とタイムリマップ（MV-0012）", () => {
   });
 });
 
+describe("コンポジションのモーションブラー（MV-0013）", () => {
+  it("今と逆へ・設定（角・位相・数）は差分に入れない＝残る", () => {
+    const c = comp([]);
+    expect(compBlurOp(c)).toEqual({ op: "updateComposition", compositionId: c.id, patch: { motionBlur: { enabled: true } } });
+    expect(compBlurOp({ ...c, motionBlur: { enabled: true, shutterAngle: 90 } })).toEqual({
+      op: "updateComposition",
+      compositionId: c.id,
+      patch: { motionBlur: { enabled: false } },
+    });
+  });
+});
+
 describe("JSON Merge Patch（Rust の取引と同じ当て方）", () => {
   it("null は消す・入れ子はまぜる・並びは置き換える・元は変えない", () => {
     const t = { a: 1, b: { c: 2, d: 3 }, e: [1, 2] };
@@ -262,6 +275,13 @@ describe("重なりの順・切り替え・選択", () => {
     expect(toggleOp(l, "solo")).toEqual({ op: "updateLayer", layerId: "A", patch: { solo: true } });
     expect(toggleOp({ ...l, solo: true }, "solo")).toEqual({ op: "updateLayer", layerId: "A", patch: { solo: false } });
     expect(toggleOp(l, "locked")).toEqual({ op: "updateLayer", layerId: "A", patch: { locked: true } });
+    // モーションブラー（MV-0013）＝無ければ切として入れる
+    expect(toggleOp(l, "motionBlur")).toEqual({ op: "updateLayer", layerId: "A", patch: { motionBlur: true } });
+    expect(toggleOp({ ...l, motionBlur: true }, "motionBlur")).toEqual({
+      op: "updateLayer",
+      layerId: "A",
+      patch: { motionBlur: false },
+    });
     expect(renameOp(l, " 新しい名前 ")).toEqual({ op: "updateLayer", layerId: "A", patch: { name: "新しい名前" } });
     expect(renameOp(l, "  ")).toBeNull();
     expect(renameOp(l, "A")).toBeNull();

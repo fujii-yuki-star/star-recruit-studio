@@ -6,7 +6,7 @@ import { Splitter } from "./edit/Splitter";
 import { usePaneSizes } from "./edit/layout";
 import { useEditor } from "./edit/useEditor";
 import { editKey, editOps } from "./edit/editKeys";
-import { precomposeOp, sequenceOps, toggleTimeRemapOps } from "./edit/layerOps";
+import { compBlurOp, precomposeOp, sequenceOps, toggleTimeRemapOps } from "./edit/layerOps";
 import { PropsPanel } from "./edit/PropsPanel";
 import { PreviewOverlay } from "./edit/PreviewOverlay";
 import { AssetsPanel } from "./edit/AssetsPanel";
@@ -373,6 +373,16 @@ export function App(): React.JSX.Element {
             title="吸着（S）＝今の時刻・始まりと終わり・ほかのレイヤーの端・マーカーに吸い付く"
           >
             吸着
+          </button>
+          <button
+            type="button"
+            disabled={!editComp}
+            aria-label="コンポジションのモーションブラー"
+            aria-pressed={editComp?.motionBlur?.enabled === true}
+            onClick={() => editComp && commit([compBlurOp(editComp)])}
+            title="このコンポジションのモーションブラー（行の「M」が入ったレイヤーだけにかかる）"
+          >
+            モーションブラー
           </button>
           <button
             type="button"
