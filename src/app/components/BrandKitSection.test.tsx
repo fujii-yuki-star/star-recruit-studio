@@ -56,13 +56,28 @@ describe("BrandKitSection", () => {
    * 「「取り消す」を押してください」と言うのは、実行できない次の行動を名指しすること（§2-5）。
    */
   // 画面名は「いつもの見た目」（ADR-0036 追補 2026-11-27）＝本体は一般向け。**節まるごと**で「会社」を探す。
-  it("節の名前は「いつもの見た目」で、節のどこにも「会社」と出さない（画面まるごと）", () => {
-    const { container } = render(<BrandKitSection />);
-    expect(screen.getByRole("heading", { name: "いつもの見た目" })).toBeTruthy();
-    expect(container.textContent).toMatch(/いつもの色/);
+  // ⚠️ **状態ごとに出る文が違う**＝既定の状態だけ見ると、タイムラインだけ開いているとき等の文を見ない（変異チェックで生き残った）。
+  const textOfSection = (container: HTMLElement): string => {
     const attrs = [...container.querySelectorAll("[placeholder], [aria-label], [title]")]
       .flatMap((e) => ["placeholder", "aria-label", "title"].map((a) => e.getAttribute(a) ?? ""));
-    expect([container.textContent ?? "", ...attrs].join("\n")).not.toMatch(/会社/);
+    return [container.textContent ?? "", ...attrs].join("\n");
+  };
+  const noProject = () => {
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({ scenes: [], status: "idle", meta: { ...meta, projectId: "", companyInfo: undefined, generalBrief: undefined } } as never);
+  };
+  it.each([
+    ["動画を開いている（反映できる）", () => {}, /に反映する/],
+    ["何も開いていない", noProject, /いまは動画を開いていません/],
+    ["タイムラインだけ開いている", () => { noProject(); useTimelineStore.setState({ doc: { projectId: "proj_t", clips: [], tracks: [] } } as never); }, /タイムラインで作った動画には/],
+    ["覚えた中身を読めない", () => useProjectStore.setState({ brandKitUnreadable: true } as never), /読めませんでした/],
+  ] as const)("節の名前は「いつもの見た目」で、節のどこにも「会社」と出さない：%s", (_name, arrange, marker) => {
+    arrange();
+    const { container } = render(<BrandKitSection />);
+    expect(screen.getByRole("heading", { name: "いつもの見た目" })).toBeTruthy();
+    const text = textOfSection(container);
+    expect(text).toMatch(marker); // その状態の文を本当に見ている
+    expect(text).not.toMatch(/会社/);
   });
 
   it("反映したら、その場で戻せる導線を出す（案内だけにしない）", async () => {
