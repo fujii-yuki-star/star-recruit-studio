@@ -603,4 +603,12 @@ fn 親の変形を子に掛け_ヌルは描かず枠だけ返す() {
     assert_eq!(q[1].corners[0], [100.0, 50.0]);
     assert_eq!(q[1].corners[2], [300.0, 250.0]);
     assert_eq!(q[1].parent_linear, [1.0, 0.0, 0.0, 1.0]);
+    // 不透明なヌルも描かない（不透明度 0 で先に抜ける道と別に確かめる）
+    p.compositions[0].layers[1].transform.opacity = Animatable::number(1.0);
+    let f = render(&p, 0).expect("ヌルは描けないレイヤーではない");
+    assert!(
+        near(f.pixel(190, 95), [0, 0, 0, 255], 1),
+        "{:?}",
+        f.pixel(190, 95)
+    );
 }

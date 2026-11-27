@@ -373,3 +373,38 @@ fn 音量のキーフレームはまだ書き出せないと知らせる() {
     );
     assert!(issues[0].message.contains("音量のキーフレーム"));
 }
+
+/// MV-0010 決定5：親の親まで変形を掛ける（子 → 親 → 親の親）。親の不透明度は掛けない。
+#[test]
+fn 親の親まで変形を掛ける() {
+    let mut p = minimal();
+    let mut grand = p.compositions[0].layers[1].clone();
+    grand.id = new_id(IdKind::Layer);
+    grand.layer_type = LayerType::Null;
+    grand.solid = None;
+    grand.parent_id = None;
+    grand.transform.anchor = Animatable::vector(&[0.0, 0.0]);
+    grand.transform.position = Animatable::vector(&[1000.0, 0.0]);
+    grand.transform.scale = Animatable::vector(&[1.0, 1.0]);
+    grand.transform.rotation = Animatable::number(0.0);
+    let mut parent = grand.clone();
+    parent.id = new_id(IdKind::Layer);
+    parent.parent_id = Some(grand.id.clone());
+    parent.transform.position = Animatable::vector(&[0.0, 0.0]);
+    parent.transform.scale = Animatable::vector(&[2.0, 2.0]);
+    let mut child = parent.clone();
+    child.id = new_id(IdKind::Layer);
+    child.parent_id = Some(parent.id.clone());
+    child.transform.position = Animatable::vector(&[10.0, 5.0]);
+    child.transform.scale = Animatable::vector(&[1.0, 1.0]);
+    let c = &mut p.compositions[0];
+    c.layers = vec![child.clone(), parent, grand];
+    let m = mv_core::eval::world_matrix(c, &child, 0.0).unwrap();
+    // 子の (0,0) → 親で (10,5)×2 → 親の親で +1000
+    assert_eq!(mv_core::eval::apply(m, [0.0, 0.0]), [1020.0, 10.0]);
+    assert_eq!(
+        mv_core::eval::apply(m, [1.0, 0.0]),
+        [1022.0, 10.0],
+        "親の大きさも掛かる"
+    );
+}
