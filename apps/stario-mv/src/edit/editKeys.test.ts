@@ -35,6 +35,28 @@ describe("タイムリマップのキー（MV-0012 決定4）", () => {
   });
 });
 
+describe("キーフレームのキー（MV-0014・AE と同じ）", () => {
+  it("U・J・K（Shift を伴えば何もしない）", () => {
+    expect(k("u")).toBe("reveal");
+    expect(k("j")).toBe("prevKey");
+    expect(k("J")).toBe("prevKey");
+    expect(k("k")).toBe("nextKey");
+    expect(k("j", { shiftKey: true })).toBeNull();
+    expect(k("k", { shiftKey: true })).toBeNull();
+    expect(k("j", { ctrlKey: true })).toBeNull();
+  });
+  it("Ctrl+Alt+H＝止める（Shift を伴えば何もしない）・F9・Shift+F9・Ctrl+Shift+F9（Ctrl+F9・Alt+F9 は何もしない）", () => {
+    expect(k("h", { ctrlKey: true, altKey: true })).toBe("hold");
+    expect(k("h", { ctrlKey: true, altKey: true, shiftKey: true })).toBeNull();
+    expect(k("h", { ctrlKey: true })).toBeNull();
+    expect(k("F9")).toBe("easeBoth");
+    expect(k("F9", { shiftKey: true })).toBe("easeIn");
+    expect(k("F9", { ctrlKey: true, shiftKey: true })).toBe("easeOut");
+    expect(k("F9", { ctrlKey: true })).toBeNull();
+    expect(k("F9", { altKey: true })).toBeNull();
+  });
+});
+
 describe("編集のキー（MV-0008 決定4・AE の型）", () => {
   it("[ ] は動かす・Alt+[ ] は切る・Ctrl+] [ は重なりの順", () => {
     expect(k("[")).toBe("moveIn");

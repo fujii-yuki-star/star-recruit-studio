@@ -253,6 +253,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
       if (ops.length > 0) props.onCommit(ops);
       return;
     }
+    // ⚠️ Ctrl はここへ来ない（上で直線に戻して抜ける）＝足すのは Shift だけ
     const additive = e.shiftKey;
     const next = clickKey(selectedKeys, id, additive);
     props.onSelectKeys?.(next);

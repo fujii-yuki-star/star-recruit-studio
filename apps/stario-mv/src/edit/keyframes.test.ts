@@ -194,6 +194,8 @@ describe("補間の切り替え（MV-0014 決定3）", () => {
     expect(posKeys(toggleHoldOps(c, [pos(0), pos(20)])).map((k) => k.interpolation)).toEqual(["hold", "hold", "hold"]);
     expect(posKeys(toggleHoldOps(c, [pos(0), pos(20)]))[2]).toEqual(kf(20, [50, 50], "hold"));
     expect(posKeys(toggleHoldOps(c, [pos(10)])).map((k) => k.interpolation)).toEqual(["linear", "linear", "bezier"]);
+    // 止めると直線が混ざっていれば、全部止めるへ揃える
+    expect(posKeys(toggleHoldOps(c, [pos(0), pos(10)])).map((k) => k.interpolation)).toEqual(["hold", "hold", "bezier"]);
     expect(toggleHoldOps(c, [pos(7)])).toEqual([]);
     expect(toggleHoldOps(comp([layer("A", { locked: true })]), [pos(0)])).toEqual([]);
   });
