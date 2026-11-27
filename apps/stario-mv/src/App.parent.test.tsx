@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 
 const handlers: Record<string, (p: unknown) => void> = {};
 const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
+let applyWarnings: string[] = [];
 
 const comp = { id: "cmp_A", name: "本編", width: 640, height: 360, fps: { num: 30, den: 1 }, durationFrames: 300 };
 const tf = { anchor: { value: [0, 0] }, position: { value: [100, 50] }, scale: { value: [1, 1] }, rotation: { value: 0 }, opacity: { value: 1 } };
@@ -39,7 +40,7 @@ vi.mock("@tauri-apps/api/core", () => ({
           ],
         },
       };
-    if (cmd === "edit_apply") return { applied: true, revision: "r2", reapplied: false, created: [] };
+    if (cmd === "edit_apply") return { applied: true, revision: "r2", reapplied: false, created: [], warnings: applyWarnings };
     if (cmd === "edit_eval") return { "/transform/position": [100, 50] };
     if (cmd === "edit_history") return { undo: null, redo: null };
     if (cmd === "preview_bounds")
@@ -75,6 +76,7 @@ async function mount(): Promise<void> {
 describe("親子付けとヌル（MV-0010 ①）", () => {
   beforeEach(() => {
     calls.length = 0;
+    applyWarnings = [];
   });
   afterEach(cleanup);
 
@@ -96,6 +98,15 @@ describe("親子付けとヌル（MV-0010 ①）", () => {
       [{ op: "setParent", layerId: "CHILD", parentId: "OTHER", frame: 7 }],
       [{ op: "setParent", layerId: "CHILD", parentId: null, frame: 7 }],
     ]);
+  });
+
+  it("見た目を保てなかったときは知らせる（黙って別の見た目にしない）", async () => {
+    await mount();
+    applyWarnings = ["「名前CHILD」の位置・大きさ・回転のどれかがキーフレームか式なので、見た目を保たずに親を付け替えました。"];
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "名前CHILDの親" }), { target: { value: "OTHER" } });
+    });
+    expect(screen.getByRole("status").textContent).toContain("見た目を保たずに");
   });
 
   it("「ヌルを足す」でいちばん手前にヌルを足す", async () => {
