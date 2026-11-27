@@ -1,0 +1,169 @@
+// タイムラインの操作 → 取引の中身（MV-0008 決定4 の表）。画面に依存しない純粋な関数。
+// ⚠️ ここでは**組み立てるだけ**。検査と保存は Rust の取引（外部 AI と同じ道＝決定1）。
+// ⚠️ 錠のかかったレイヤーは動かさない・消さない（AE の型＝錠は編集から守る）。
+import type { Composition, Layer, Op } from "./types";
+
+/** ずらす＝見えている範囲と素材の時刻を同じだけ（中身は動かない）。 */
+export function shiftPatch(l: Layer, delta: number): Record<string, number> {
+  return { inFrame: l.inFrame + delta, outFrame: l.outFrame + delta, startFrame: l.startFrame + delta };
+}
+
+function editable(comp: Composition, ids: ReadonlySet<string>): Layer[] {
+  return comp.layers.filter((l) => ids.has(l.id) && !l.locked);
+}
+
+/** 帯を掴んで左右へ（選んでいるものをまとめて同じだけ）。 */
+export function moveOps(comp: Composition, ids: ReadonlySet<string>, delta: number): Op[] {
+  if (delta === 0) return [];
+  return editable(comp, ids).map((l) => ({ op: "updateLayer", layerId: l.id, patch: shiftPatch(l, delta) }));
+}
+
+/** 左の端を `frame` へ（範囲が空になるなら何もしない）。 */
+export function trimInOps(comp: Composition, ids: ReadonlySet<string>, frame: number): Op[] {
+  return editable(comp, ids)
+    .filter((l) => frame < l.outFrame && frame !== l.inFrame)
+    .map((l) => ({ op: "updateLayer", layerId: l.id, patch: { inFrame: frame } }));
+}
+
+/** 右の端を `frame`（含まない）へ。 */
+export function trimOutOps(comp: Composition, ids: ReadonlySet<string>, frame: number): Op[] {
+  return editable(comp, ids)
+    .filter((l) => frame > l.inFrame && frame !== l.outFrame)
+    .map((l) => ({ op: "updateLayer", layerId: l.id, patch: { outFrame: frame } }));
+}
+
+/**
+ * 今の時刻で切る（`Alt+[`・`Alt+]`）。⚠️ AE の型＝`Alt+]` は今の時刻のコマを**最後に見えるコマ**にする
+ *（終わりは含まないので `playhead + 1`）。
+ */
+export function trimToPlayheadOps(
+  comp: Composition,
+  ids: ReadonlySet<string>,
+  playhead: number,
+  edge: "in" | "out",
+): Op[] {
+  return edge === "in" ? trimInOps(comp, ids, playhead) : trimOutOps(comp, ids, playhead + 1);
+}
+
+/** 始まり／終わりを今の時刻へ動かす（`[`・`]`＝長さは変えずにずらす）。`]` は今の時刻が最後に見えるコマ。 */
+export function moveToPlayheadOps(
+  comp: Composition,
+  ids: ReadonlySet<string>,
+  playhead: number,
+  edge: "in" | "out",
+): Op[] {
+  return editable(comp, ids)
+    .map((l) => ({ l, delta: edge === "in" ? playhead - l.inFrame : playhead + 1 - l.outFrame }))
+    .filter(({ delta }) => delta !== 0)
+    .map(({ l, delta }) => ({ op: "updateLayer", layerId: l.id, patch: shiftPatch(l, delta) }));
+}
+
+/** 今の時刻で2つに分ける（`Ctrl+Shift+D`）。今の時刻が範囲の内側のレイヤーだけ。 */
+export function splitOps(comp: Composition, ids: ReadonlySet<string>, playhead: number): Op[] {
+  return editable(comp, ids)
+    .filter((l) => l.inFrame < playhead && playhead < l.outFrame)
+    .map((l) => ({ op: "splitLayer", layerId: l.id, frame: playhead }));
+}
+
+/** 詰める（AE の「シーケンスレイヤー」）＝選んだものを時間の順に隙間なく並べ直す。いちばん早いものは動かさない。 */
+export function sequenceOps(comp: Composition, ids: ReadonlySet<string>): Op[] {
+  const ls = editable(comp, ids).sort((a, b) => a.inFrame - b.inFrame || a.outFrame - b.outFrame);
+  const ops: Op[] = [];
+  let at = ls[0]?.inFrame ?? 0;
+  for (const l of ls) {
+    const delta = at - l.inFrame;
+    if (delta !== 0) ops.push({ op: "updateLayer", layerId: l.id, patch: shiftPatch(l, delta) });
+    at += l.outFrame - l.inFrame;
+  }
+  return ops;
+}
+
+/** 消す（`Delete`）。 */
+export function removeOps(comp: Composition, ids: ReadonlySet<string>): Op[] {
+  return editable(comp, ids).map((l) => ({ op: "removeLayer", layerId: l.id }));
+}
+
+/**
+ * 消して詰める（`Shift+Delete`）＝消して、後ろのレイヤー（消したものの終わり以降に始まるもの）をその長さだけ前へ。
+ * いくつか消すときは、そのレイヤーより前で終わる消したものの長さを足した分だけ前へ。
+ */
+export function rippleRemoveOps(comp: Composition, ids: ReadonlySet<string>): Op[] {
+  const removed = editable(comp, ids);
+  if (removed.length === 0) return [];
+  const gone = new Set(removed.map((l) => l.id));
+  const ops: Op[] = removed.map((l) => ({ op: "removeLayer", layerId: l.id }));
+  for (const l of comp.layers) {
+    if (gone.has(l.id) || l.locked) continue;
+    const pull = removed.filter((r) => r.outFrame <= l.inFrame).reduce((s, r) => s + (r.outFrame - r.inFrame), 0);
+    if (pull > 0) ops.push({ op: "updateLayer", layerId: l.id, patch: shiftPatch(l, -pull) });
+  }
+  return ops;
+}
+
+/**
+ * 重なりの順を1つ動かす（`Ctrl+]`＝手前へ・`Ctrl+[`＝奥へ）。並びは先頭が最前面。
+ * まとめて動かすときは、ぶつかる側から順に動かして互いを追い越さない。
+ */
+export function stackStepOps(comp: Composition, ids: ReadonlySet<string>, dir: "forward" | "backward"): Op[] {
+  const order = comp.layers.map((l) => l.id);
+  const picked = order.filter((id) => ids.has(id));
+  const seq = dir === "forward" ? picked : [...picked].reverse();
+  const ops: Op[] = [];
+  for (const id of seq) {
+    const i = order.indexOf(id);
+    const j = dir === "forward" ? i - 1 : i + 1;
+    if (j < 0 || j >= order.length || ids.has(order[j])) continue;
+    order.splice(i, 1);
+    order.splice(j, 0, id);
+    ops.push({ op: "moveLayer", layerId: id, index: j });
+  }
+  return ops;
+}
+
+/** 名前の列を掴んで上下へ＝`to`（0＝最前面）へ置く。同じ所なら何もしない。 */
+export function reorderOps(comp: Composition, id: string, to: number): Op[] {
+  const from = comp.layers.findIndex((l) => l.id === id);
+  if (from < 0) return [];
+  const index = Math.max(0, Math.min(comp.layers.length - 1, to));
+  return index === from ? [] : [{ op: "moveLayer", layerId: id, index }];
+}
+
+/** 切り替え（目・ソロ・錠）と名前の変更。 */
+export function toggleOp(l: Layer, key: "enabled" | "solo" | "locked"): Op {
+  const now = key === "solo" ? l.solo === true : l[key];
+  return { op: "updateLayer", layerId: l.id, patch: { [key]: !now } };
+}
+
+export function renameOp(l: Layer, name: string): Op | null {
+  const n = name.trim();
+  return n === "" || n === l.name ? null : { op: "updateLayer", layerId: l.id, patch: { name: n } };
+}
+
+/** 範囲の選択（`Shift`＝基点からの間を全部）。並びの順で返す。 */
+export function rangeSelect(comp: Composition, anchor: string, to: string): string[] {
+  const ids = comp.layers.map((l) => l.id);
+  const a = ids.indexOf(anchor);
+  const b = ids.indexOf(to);
+  if (a < 0 || b < 0) return [to];
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return ids.slice(lo, hi + 1);
+}
+
+/**
+ * 掴んでいる途中の見え方＝試しの中の時刻の変更（`updateLayer` の inFrame・outFrame・startFrame）だけを当てた写し。
+ * ⚠️ プレビューは Rust が試しを描くが、**タイムラインの帯も一緒に動かす**（離すまで帯が止まって見えないように）。
+ */
+export function withTrial(layers: readonly Layer[], ops: readonly Op[]): Layer[] {
+  const patch = new Map<string, Partial<Layer>>();
+  for (const o of ops) {
+    if (o.op !== "updateLayer") continue;
+    const p: Partial<Layer> = {};
+    for (const k of ["inFrame", "outFrame", "startFrame"] as const) {
+      const v = o.patch[k];
+      if (typeof v === "number") p[k] = v;
+    }
+    patch.set(o.layerId, { ...patch.get(o.layerId), ...p });
+  }
+  return patch.size === 0 ? [...layers] : layers.map((l) => (patch.has(l.id) ? { ...l, ...patch.get(l.id) } : l));
+}
+

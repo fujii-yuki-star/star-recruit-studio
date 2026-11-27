@@ -4,6 +4,7 @@
 
 mod audio;
 mod clock;
+mod edit;
 mod preview;
 
 use mv_core::io::Loaded;
@@ -18,6 +19,9 @@ use tauri_plugin_dialog::DialogExt;
 
 /// プレビューの糸への口。
 struct PreviewTx(Mutex<Sender<Cmd>>);
+
+/// 画面の取引を送る操作口（外部 AI と同じ `mv-ops`＝MV-0008 決定1）。
+struct Editor(Mutex<mv_ops::Ops>);
 
 /// 起動の引数で渡された動画（`--project <フォルダ>`＝MV-0007 決定5）。
 struct InitialProject(Option<PathBuf>);
@@ -114,6 +118,49 @@ fn preview_set_composition(id: String, tx: tauri::State<PreviewTx>) -> Result<()
     tx.send(Cmd::Composition(id))
 }
 
+/// 編集に使う動画の全体と版（MV-0008）。
+#[tauri::command]
+async fn edit_read(dir: String) -> Result<Value, String> {
+    edit::read(Path::new(&dir))
+}
+
+/// 画面の取引を反映する（検査を通ったときだけ保存＝MV-0008 決定1・2）。保存したらプレビューをすぐ読み直す。
+#[tauri::command]
+async fn edit_apply(
+    dir: String,
+    ops: Value,
+    base_revision: Option<String>,
+    editor: tauri::State<'_, Editor>,
+    tx: tauri::State<'_, PreviewTx>,
+) -> Result<Value, String> {
+    let r = {
+        let mut engine = editor
+            .0
+            .lock()
+            .map_err(|_| "編集の口が止まっています。アプリを起動し直してください。".to_string())?;
+        edit::apply(
+            &mut *engine,
+            Path::new(&dir),
+            &ops,
+            base_revision.as_deref(),
+            &mut std::thread::sleep,
+        )
+    };
+    // 断ったときも試しはやめる（元の見え方へ戻す）
+    tx.send(if r.is_ok() {
+        Cmd::Reload
+    } else {
+        Cmd::Trial(None)
+    })?;
+    r
+}
+
+/// 掴んで動かしている途中の編集を、プレビューに試しとして渡す（保存しない）。`ops` が無ければやめる。
+#[tauri::command]
+fn edit_trial(ops: Option<Vec<Value>>, tx: tauri::State<PreviewTx>) -> Result<(), String> {
+    tx.send(Cmd::Trial(ops))
+}
+
 /// 起動の引数から `--project <フォルダ>` を取り出す。
 fn project_arg(args: &[String]) -> Option<PathBuf> {
     args.iter()
@@ -190,6 +237,7 @@ pub fn run() {
             let ffmpeg = resolve_ffmpeg(&settings, res.as_deref());
             let (tx, rx) = std::sync::mpsc::channel();
             app.manage(PreviewTx(Mutex::new(tx)));
+            app.manage(Editor(Mutex::new(mv_ops::Ops::new(settings.clone(), None))));
             preview::spawn(window, fonts, ffmpeg, rx);
             Ok(())
         })
@@ -203,7 +251,10 @@ pub fn run() {
             preview_seek,
             preview_step,
             preview_set_composition,
-            preview_set_muted
+            preview_set_muted,
+            edit_read,
+            edit_apply,
+            edit_trial
         ])
         .run(tauri::generate_context!())
         .expect("すたりおMV を起動できませんでした");

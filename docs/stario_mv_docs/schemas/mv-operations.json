@@ -138,6 +138,18 @@
               {
                 "type": "object",
                 "additionalProperties": false,
+                "required": ["op", "layerId", "frame"],
+                "description": "レイヤーを frame（コンポジションのフレーム）で2つに分ける（AE の「レイヤーを分割」＝MV-0008 決定4）。元は frame で終わり、写しが frame から始まって元の1つ上（手前）に置かれる。写しは元と同じ中身（素材の時刻・キーフレーム・エフェクト）で、ID だけ新しい（id を渡せばそれを使う・無ければ発行して created に返す）。frame は元の inFrame より後・outFrame より前。",
+                "properties": {
+                  "op": { "const": "splitLayer" },
+                  "layerId": { "type": "string" },
+                  "frame": { "type": "integer", "minimum": 1 },
+                  "id": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
                 "required": ["op", "composition"],
                 "description": "コンポジションを足す。composition には name・width・height・fps（{num, den}）・durationFrames を書く（background は既定で黒・layers と markers は空）。",
                 "properties": {
